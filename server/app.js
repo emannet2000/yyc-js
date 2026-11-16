@@ -1363,7 +1363,7 @@ export function createApplication({
           const severity = choice(data, 'severity', ['low','medium','high','critical']);
           requireThat(title.length <= 160, 400, 'Incident title is too long.');
           send(res, 201, sysadmin.recordIncident({ id: randomUUID(), title, details, severity, actorId: user.id }));
-        } else if (req.method === 'POST' && /^\\/api\\/sysadmin\\/incident-records\\/[a-f0-9-]+\\/status$/.test(path)) {
+        } else if (req.method === 'POST' && /^\/api\/sysadmin\/incident-records\/[a-f0-9-]+\/status$/.test(path)) {
           const data = await readBody(req);
           const status = choice(data, 'status', ['open','acknowledged','resolved']);
           const id = path.split('/')[4];

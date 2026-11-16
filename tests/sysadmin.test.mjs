@@ -93,3 +93,21 @@ test('operational alerts include unresolved critical incidents and clear after r
   const after = await f.admin('/api/sysadmin/alerts');
   assert.ok(!after.value.alerts.some((a) => a.incidentId === created.value.id));
 });
+
+test('operational samples are persisted and limited to administrator access', async (t) => {
+  const f = await setup(t);
+  const path = '/api/sysadmin/observations';
+  assert.equal((await f.store(path)).status, 403);
+  assert.equal((await f.driver(path + '/sample', 'POST', {})).status, 403);
+  const before = await f.admin(path);
+  assert.equal(before.status, 200);
+  assert.deepEqual(before.value.observations, []);
+  const sample = await f.admin(path + '/sample', 'POST', {});
+  assert.equal(sample.status, 201);
+  assert.ok(Number.isInteger(sample.value.httpTotal));
+  const after = await f.admin(path);
+  assert.equal(after.status, 200);
+  assert.equal(after.value.observations.length, 1);
+  assert.equal(after.value.observations[0].httpTotal, sample.value.httpTotal);
+  assert.equal((await f.store(path + '/sample', 'POST', {})).status, 403);
+});

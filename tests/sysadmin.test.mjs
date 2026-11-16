@@ -10,7 +10,7 @@ test('SysAdmin endpoints require authentication and broker role', async (t) => {
     assert.equal((await f.store(endpoint)).status, 403);
     assert.equal((await f.driver(endpoint)).status, 403);
     assert.equal((await f.admin(endpoint)).status, 200);
-    assert.equal((await f.admin(endpoint, 'POST', {})).status, 405);
+    assert.equal((await f.admin(endpoint, 'POST', {})).status, endpoint.endsWith('/incidents') ? 405 : 405);
   }
 });
 
@@ -47,4 +47,19 @@ test('incident records require admin, validate input, and persist status changes
   assert.equal(updated.value.status, 'acknowledged');
   assert.equal((await f.admin(path + '/' + id + '/status', 'POST', { status: 'bad' })).status, 400);
   assert.equal((await f.admin(path + '/not-an-incident/status', 'POST', { status: 'resolved' })).status, 405);
+  const history = await f.admin(path + '/' + id + '/history');
+  assert.equal(history.status, 200);
+  assert.deepEqual(history.value.events.map((event) => event.action), ['status:acknowledged','created']);
+});
+
+test('data quality and readiness checks do not claim unverified release readiness', async (t) => {
+  const f = await setup(t);
+  const quality = await f.admin('/api/sysadmin/data-quality');
+  assert.equal(quality.status, 200);
+  assert.equal(quality.value.healthy, true);
+  const readiness = await f.admin('/api/sysadmin/readiness');
+  assert.equal(readiness.status, 200);
+  assert.equal(readiness.value.ready, false);
+  assert.equal(readiness.value.checks.backupVerified, null);
+  assert.equal((await f.store('/api/sysadmin/readiness')).status, 403);
 });

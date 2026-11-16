@@ -96,6 +96,28 @@ export function createSysadmin({ db, now = Date.now }) {
       })).sort((a,b) => b.requests-a.requests).slice(0,30),
     };
   }
+  function alerts() {
+    const quality = dataQuality();
+    const critical = db.prepare(`SELECT id,title,severity,status,updated_at AS updatedAt
+      FROM sysadmin_incidents WHERE severity='critical' AND status<>'resolved'
+      ORDER BY updated_at DESC LIMIT 25`).all();
+    const items = critical.map((incident) => ({
+      code: 'critical_incident', severity: 'critical', incidentId: incident.id,
+      message: 'Critical incident awaiting resolution', updatedAt: incident.updatedAt,
+    }));
+    if (!quality.healthy) items.push({
+      code: 'shipment_integrity', severity: 'high',
+      message: 'Shipment integrity checks reported inconsistencies',
+      counts: { unassignedActive: quality.unassignedActive,
+        missingStores: quality.missingStores, orphanedOffers: quality.orphanedOffers },
+    });
+    if (http.total >= 20 && http.errors5xx / http.total >= 0.05) items.push({
+      code: 'server_error_rate', severity: 'high',
+      message: 'HTTP 5xx rate at or above 5% since process start',
+      requests: http.total, errors5xx: http.errors5xx,
+    });
+    return { checkedAt: new Date(now()).toISOString(), alerts: items, evaluatedRequests: http.total };
+  }
   function snapshot() {
     const integrity = db.prepare('PRAGMA quick_check').all().map((row) => Object.values(row)[0]);
     const foreignKeys = db.prepare('PRAGMA foreign_key_check').all().length;
@@ -125,5 +147,5 @@ export function createSysadmin({ db, now = Date.now }) {
       FROM shipments WHERE status IN ('Delivery failed','Returning') ORDER BY updated_at DESC LIMIT 50`).all();
     return pending.map((s) => ({ id: s.id, type: 'shipment_exception', status: s.status, updatedAt: s.updatedAt }));
   }
-  return { snapshot, events, incidents, recordIncident, getIncident, changeIncident, trackedIncidents, incidentHistory, dataQuality, readiness, observeHttp, httpMetrics };
+  return { snapshot, events, incidents, recordIncident, getIncident, changeIncident, trackedIncidents, incidentHistory, dataQuality, readiness, observeHttp, httpMetrics, alerts };
 }

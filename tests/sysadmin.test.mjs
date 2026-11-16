@@ -63,3 +63,16 @@ test('data quality and readiness checks do not claim unverified release readines
   assert.equal(readiness.value.checks.backupVerified, null);
   assert.equal((await f.store('/api/sysadmin/readiness')).status, 403);
 });
+
+test('HTTP metrics count requests without exposing user data or request URLs', async (t) => {
+  const f = await setup(t);
+  await f.store('/api/state');
+  await f.store('/api/sysadmin/overview');
+  const result = await f.admin('/api/sysadmin/http-metrics');
+  assert.equal(result.status, 200);
+  assert.ok(result.value.total >= 2);
+  assert.ok(result.value.errors4xx >= 1);
+  assert.ok(result.value.routes.some((row) => row.route === 'GET /api/state'));
+  assert.ok(result.value.routes.every((row) => !row.route.includes('example.com')));
+  assert.equal((await f.store('/api/sysadmin/http-metrics')).status, 403);
+});

@@ -118,6 +118,37 @@ export function createSysadmin({ db, now = Date.now }) {
     });
     return { checkedAt: new Date(now()).toISOString(), alerts: items, evaluatedRequests: http.total };
   }
+  db.exec(`CREATE TABLE IF NOT EXISTS sysadmin_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    http_total INTEGER NOT NULL,
+    http_4xx INTEGER NOT NULL,
+    http_5xx INTEGER NOT NULL,
+    memory_rss_bytes INTEGER NOT NULL,
+    open_alerts INTEGER NOT NULL
+  );`);
+  function sampleObservations() {
+    const active = alerts();
+    const stamp = new Date(now()).toISOString();
+    const result = db.prepare(`INSERT INTO sysadmin_observations
+      (observed_at,http_total,http_4xx,http_5xx,memory_rss_bytes,open_alerts)
+      VALUES (?,?,?,?,?,?)`).run(
+      stamp, http.total, http.errors4xx, http.errors5xx,
+      process.memoryUsage().rss, active.alerts.length
+    );
+    // Retain at most 2,000 samples to bound SQLite growth.
+    db.prepare(`DELETE FROM sysadmin_observations WHERE id NOT IN
+      (SELECT id FROM sysadmin_observations ORDER BY id DESC LIMIT 2000)`).run();
+    return { id: Number(result.lastInsertRowid), observedAt: stamp,
+      httpTotal: http.total, errors4xx: http.errors4xx,
+      errors5xx: http.errors5xx, openAlerts: active.alerts.length };
+  }
+  function observationHistory() {
+    return db.prepare(`SELECT observed_at AS observedAt,http_total AS httpTotal,
+      http_4xx AS errors4xx,http_5xx AS errors5xx,
+      memory_rss_bytes AS memoryRssBytes,open_alerts AS openAlerts
+      FROM sysadmin_observations ORDER BY id DESC LIMIT 100`).all();
+  }
   function snapshot() {
     const integrity = db.prepare('PRAGMA quick_check').all().map((row) => Object.values(row)[0]);
     const foreignKeys = db.prepare('PRAGMA foreign_key_check').all().length;
@@ -147,5 +178,5 @@ export function createSysadmin({ db, now = Date.now }) {
       FROM shipments WHERE status IN ('Delivery failed','Returning') ORDER BY updated_at DESC LIMIT 50`).all();
     return pending.map((s) => ({ id: s.id, type: 'shipment_exception', status: s.status, updatedAt: s.updatedAt }));
   }
-  return { snapshot, events, incidents, recordIncident, getIncident, changeIncident, trackedIncidents, incidentHistory, dataQuality, readiness, observeHttp, httpMetrics, alerts };
+  return { snapshot, events, incidents, recordIncident, getIncident, changeIncident, trackedIncidents, incidentHistory, dataQuality, readiness, observeHttp, httpMetrics, alerts, sampleObservations, observationHistory };
 }

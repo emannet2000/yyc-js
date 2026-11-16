@@ -1381,6 +1381,7 @@ export function createApplication({
           else if (path === '/api/sysadmin/incidents') send(res, 200, { incidents: sysadmin.incidents() });
           else if (path === '/api/sysadmin/incident-records') send(res, 200, { incidents: sysadmin.trackedIncidents() });
           else if (path === '/api/sysadmin/http-metrics') send(res, 200, sysadmin.httpMetrics());
+          else if (path === '/api/sysadmin/alerts') send(res, 200, sysadmin.alerts());
           else if (path === '/api/sysadmin/data-quality') send(res, 200, sysadmin.dataQuality());
           else if (path === '/api/sysadmin/readiness') send(res, 200, sysadmin.readiness());
           else if (/^\/api\/sysadmin\/incident-records\/[a-f0-9-]+\/history$/.test(path)) {

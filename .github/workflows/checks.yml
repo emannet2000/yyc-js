@@ -1,0 +1,63 @@
+name: Checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '21 2 * * *'
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - name: Live HTTP integration
+        run: YYC_LIVE_TESTS=true node --test tests/server.test.mjs tests/recovery.test.mjs
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - name: Upload browser reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-reports
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+  varied-properties:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        offset: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Choose and record the replay seed
+        env:
+          OFFSET: ${{ matrix.offset }}
+        run: |
+          SEED=$(node -e "process.stdout.write(String((Math.floor(Date.now()/86400000)*3+Number(process.env.OFFSET))|0))")
+          echo "FC_SEED=$SEED" >> "$GITHUB_ENV"
+          echo "Property seed: $SEED" >> "$GITHUB_STEP_SUMMARY"
+      - run: npm run test:property
+        env:
+          FC_RUNS: '2000'
+          WORKFLOW_FC_RUNS: '75'

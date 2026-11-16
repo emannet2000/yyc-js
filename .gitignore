@@ -1,0 +1,47 @@
+node_modules/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+.DS_Store
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Test reports
+playwright-report/
+test-results/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and databases
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# OS files
+.DS_Store
+data/backups/

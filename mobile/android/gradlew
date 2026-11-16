@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+version=8.11.1
+bootstrap="$PWD/.gradle-bootstrap"
+if [[ ! -x "$bootstrap/gradle-$version/bin/gradle" ]]; then
+  mkdir -p "$bootstrap"
+  archive="gradle-$version-bin.zip"
+  curl --fail --location --proto '=https' --tlsv1.2 "https://services.gradle.org/distributions/$archive" -o "$bootstrap/$archive"
+  curl --fail --location --proto '=https' --tlsv1.2 "https://services.gradle.org/distributions/$archive.sha256" -o "$bootstrap/$archive.sha256"
+  expected=$(tr -d '[:space:]' < "$bootstrap/$archive.sha256")
+  actual=$(sha256sum "$bootstrap/$archive" | cut -d ' ' -f 1)
+  [[ "$expected" =~ ^[a-f0-9]{64}$ && "$actual" == "$expected" ]] || { echo 'Gradle checksum mismatch.' >&2; exit 1; }
+  unzip -q "$bootstrap/$archive" -d "$bootstrap"
+fi
+exec "$bootstrap/gradle-$version/bin/gradle" "$@"

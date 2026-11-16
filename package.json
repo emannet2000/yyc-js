@@ -1,0 +1,51 @@
+{
+  "name": "yyc-brokers-react-typescript",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint frontend shared server tests scripts/dev.js vite.config.ts playwright.config.js && node scripts/check-demo.cjs",
+    "format:check": "prettier --check frontend shared server tests scripts vite.config.ts eslint.config.js package.json README.md CODE_REVIEW.md playwright.config.js .github/workflows",
+    "preview": "vite preview",
+    "start": "node server/start.js",
+    "create-admin": "node server/create-admin.js",
+    "test": "node --test tests/*.test.mjs",
+    "format": "prettier --write frontend shared server tests scripts vite.config.ts eslint.config.js package.json README.md CODE_REVIEW.md playwright.config.js .github/workflows",
+    "test:property": "node --test tests/properties.test.mjs tests/workflow-properties.test.mjs",
+    "test:browser": "npm run build && playwright test",
+    "backup": "node server/backup-cli.js backup",
+    "restore": "node server/backup-cli.js restore",
+    "test:workflows": "node --test tests/workflow*.test.mjs tests/*dom.test.mjs",
+    "backup:scheduled": "node server/maintenance-cli.js backup",
+    "recovery:drill": "node server/maintenance-cli.js drill",
+    "start:configured": "node --env-file=.env server/start.js"
+  },
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zustand": "5.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.65.1",
+    "@types/node": "24.13.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "fast-check": "4.10.2",
+    "globals": "15.15.0",
+    "jsdom": "26.1.0",
+    "prettier": "3.10.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.2",
+    "vite": "8.3.8"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

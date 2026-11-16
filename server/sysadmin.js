@@ -46,6 +46,30 @@ export function createSysadmin({ db, now = Date.now }) {
   function trackedIncidents() {
     return db.prepare('SELECT id,title,severity,status,details,created_at AS createdAt,updated_at AS updatedAt FROM sysadmin_incidents ORDER BY updated_at DESC LIMIT 100').all();
   }
+  function incidentHistory(id) {
+    return db.prepare(`SELECT action,created_at AS createdAt FROM sysadmin_incident_audit
+      WHERE incident_id=? ORDER BY id DESC LIMIT 100`).all(id);
+  }
+  function dataQuality() {
+    const unassignedActive = db.prepare(`SELECT count(*) AS total FROM shipments
+      WHERE status IN ('Assigned','In transit','Delivery failed','Returning') AND driver_id IS NULL`).get().total;
+    const missingStores = db.prepare(`SELECT count(*) AS total FROM shipments s
+      LEFT JOIN users u ON u.id=s.store_id WHERE u.id IS NULL`).get().total;
+    const orphanedOffers = db.prepare(`SELECT count(*) AS total FROM shipments
+      WHERE status='Offered' AND offered_to IS NULL`).get().total;
+    return { checkedAt: new Date(now()).toISOString(), unassignedActive, missingStores, orphanedOffers,
+      healthy: unassignedActive===0 && missingStores===0 && orphanedOffers===0 };
+  }
+  function readiness() {
+    const quality = dataQuality();
+    const openCritical = db.prepare(`SELECT count(*) AS total FROM sysadmin_incidents
+      WHERE severity='critical' AND status<>'resolved'`).get().total;
+    return { checkedAt: new Date(now()).toISOString(), checks: {
+      dataQuality: quality.healthy, noOpenCriticalIncidents: openCritical===0,
+      backupVerified: null, browserTestsPassed: null, securityReviewPassed: null,
+      rollbackVerified: null
+    }, ready: false, reason: 'Manual and external checks have not been verified' };
+  }
   function snapshot() {
     const integrity = db.prepare('PRAGMA quick_check').all().map((row) => Object.values(row)[0]);
     const foreignKeys = db.prepare('PRAGMA foreign_key_check').all().length;
@@ -75,5 +99,5 @@ export function createSysadmin({ db, now = Date.now }) {
       FROM shipments WHERE status IN ('Delivery failed','Returning') ORDER BY updated_at DESC LIMIT 50`).all();
     return pending.map((s) => ({ id: s.id, type: 'shipment_exception', status: s.status, updatedAt: s.updatedAt }));
   }
-  return { snapshot, events, incidents, recordIncident, getIncident, changeIncident, trackedIncidents };
+  return { snapshot, events, incidents, recordIncident, getIncident, changeIncident, trackedIncidents, incidentHistory, dataQuality, readiness };
 }

@@ -19,6 +19,7 @@ import { prePickup, cargoStates, validDeadline } from '../shared/planning.js';
 import { createOperations } from './operations.js';
 import { createMobility } from './mobility.js';
 import { createMobile } from './mobile.js';
+import { createSysadmin } from './sysadmin.js';
 
 const deriveKey = promisify(scrypt);
 const project = fileURLToPath(new URL('../', import.meta.url));
@@ -1158,6 +1159,7 @@ export function createApplication({
     operations,
     mobility,
   });
+  const sysadmin = createSysadmin({ db, now });
   const server = createServer(async (req, res) => {
     try {
       let path;
@@ -1343,6 +1345,16 @@ export function createApplication({
         db.prepare('DELETE FROM sessions WHERE token_hash=?').run(current.token_hash);
         res.setHeader('Set-Cookie', cookie('', 0));
         send(res, 200, { ok: true });
+        return;
+      }
+      if (path.startsWith('/api/sysadmin/')) {
+        requireThat(user.role === 'admin', 403, 'Administrator access required.');
+        requireThat(req.method === 'GET', 405, 'SysAdmin endpoints are read-only.');
+        res.setHeader('Cache-Control', 'no-store');
+        if (path === '/api/sysadmin/overview') send(res, 200, sysadmin.snapshot());
+        else if (path === '/api/sysadmin/events') send(res, 200, { events: sysadmin.events() });
+        else if (path === '/api/sysadmin/incidents') send(res, 200, { incidents: sysadmin.incidents() });
+        else throw new HttpError(404, 'SysAdmin endpoint not found.');
         return;
       }
       if (path === '/api/state' && req.method === 'GET') {

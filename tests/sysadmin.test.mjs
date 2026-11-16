@@ -76,3 +76,20 @@ test('HTTP metrics count requests without exposing user data or request URLs', a
   assert.ok(result.value.routes.every((row) => !row.route.includes('example.com')));
   assert.equal((await f.store('/api/sysadmin/http-metrics')).status, 403);
 });
+
+test('operational alerts include unresolved critical incidents and clear after resolution', async (t) => {
+  const f = await setup(t);
+  const path = '/api/sysadmin/incident-records';
+  const created = await f.admin(path, 'POST', {
+    title: 'Major outage', severity: 'critical', details: 'Test incident',
+  });
+  assert.equal(created.status, 201);
+  const before = await f.admin('/api/sysadmin/alerts');
+  assert.equal(before.status, 200);
+  assert.ok(before.value.alerts.some((a) => a.code === 'critical_incident' && a.incidentId === created.value.id));
+  assert.equal((await f.store('/api/sysadmin/alerts')).status, 403);
+  const resolved = await f.admin(path + '/' + created.value.id + '/status', 'POST', { status: 'resolved' });
+  assert.equal(resolved.status, 200);
+  const after = await f.admin('/api/sysadmin/alerts');
+  assert.ok(!after.value.alerts.some((a) => a.incidentId === created.value.id));
+});

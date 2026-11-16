@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { performance } from 'node:perf_hooks';
 import { DatabaseSync } from 'node:sqlite';
 import {
   randomBytes,
@@ -1161,6 +1162,30 @@ export function createApplication({
   });
   const sysadmin = createSysadmin({ db, now });
   const server = createServer(async (req, res) => {
+    const startedAt = performance.now();
+    let responseStatus = 200;
+    const originalWriteHead = res.writeHead.bind(res);
+    res.writeHead = (status, ...args) => {
+      responseStatus = status;
+      return originalWriteHead(status, ...args);
+    };
+    const originalEnd = res.end.bind(res);
+    let measured = false;
+    res.end = (...args) => {
+      if (!measured) {
+        measured = true;
+        const rawPath = String(req.url || '').split('?')[0];
+        const segments = rawPath.split('/').filter(Boolean);
+        const route = segments[0] === 'api'
+          ? '/api/' + (segments[1] || 'other')
+          : '/static';
+        sysadmin.observeHttp({
+          method: req.method || 'GET', route,
+          status: responseStatus, durationMs: Math.max(0, performance.now() - startedAt),
+        });
+      }
+      return originalEnd(...args);
+    };
     try {
       let path;
       try {
@@ -1355,6 +1380,7 @@ export function createApplication({
           else if (path === '/api/sysadmin/events') send(res, 200, { events: sysadmin.events() });
           else if (path === '/api/sysadmin/incidents') send(res, 200, { incidents: sysadmin.incidents() });
           else if (path === '/api/sysadmin/incident-records') send(res, 200, { incidents: sysadmin.trackedIncidents() });
+          else if (path === '/api/sysadmin/http-metrics') send(res, 200, sysadmin.httpMetrics());
           else if (path === '/api/sysadmin/data-quality') send(res, 200, sysadmin.dataQuality());
           else if (path === '/api/sysadmin/readiness') send(res, 200, sysadmin.readiness());
           else if (/^\/api\/sysadmin\/incident-records\/[a-f0-9-]+\/history$/.test(path)) {

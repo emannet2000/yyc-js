@@ -14,7 +14,7 @@ const app = createApplication({
   secureCookies: process.env.COOKIE_SECURE === 'true',
 });
 const port = Number(process.env.PORT || 3000),
-  host = process.env.HOST || '127.0.0.1';
+  host = process.env.HOST || '0.0.0.0';
 app.server.listen(port, host, () =>
   console.log(`YYC workspace: http://${host}:${port}/react/`),
 );

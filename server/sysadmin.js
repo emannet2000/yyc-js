@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { performance, monitorEventLoopDelay } from 'node:perf_hooks';
 
 const started = performance.now();

@@ -70,6 +70,32 @@ export function createSysadmin({ db, now = Date.now }) {
       rollbackVerified: null
     }, ready: false, reason: 'Manual and external checks have not been verified' };
   }
+  const http = { total: 0, errors4xx: 0, errors5xx: 0, latencyMsTotal: 0, latencyMsMax: 0, routes: new Map() };
+  function observeHttp({ method, route, status, durationMs }) {
+    // Record only the route category, never URLs, tokens, IPs, or request bodies.
+    const key = method + ' ' + route;
+    const row = http.routes.get(key) || { route: key, requests: 0, errors: 0, latencyMsTotal: 0 };
+    row.requests++;
+    row.latencyMsTotal += durationMs;
+    if (status >= 400) row.errors++;
+    http.routes.set(key, row);
+    http.total++;
+    if (status >= 400 && status < 500) http.errors4xx++;
+    if (status >= 500) http.errors5xx++;
+    http.latencyMsTotal += durationMs;
+    http.latencyMsMax = Math.max(http.latencyMsMax, durationMs);
+  }
+  function httpMetrics() {
+    return {
+      sinceStart: true, total: http.total, errors4xx: http.errors4xx, errors5xx: http.errors5xx,
+      averageLatencyMs: http.total ? Math.round(http.latencyMsTotal / http.total * 100) / 100 : 0,
+      maxLatencyMs: Math.round(http.latencyMsMax * 100) / 100,
+      routes: [...http.routes.values()].map((row) => ({
+        route: row.route, requests: row.requests, errors: row.errors,
+        averageLatencyMs: Math.round(row.latencyMsTotal / row.requests * 100) / 100,
+      })).sort((a,b) => b.requests-a.requests).slice(0,30),
+    };
+  }
   function snapshot() {
     const integrity = db.prepare('PRAGMA quick_check').all().map((row) => Object.values(row)[0]);
     const foreignKeys = db.prepare('PRAGMA foreign_key_check').all().length;
@@ -99,5 +125,5 @@ export function createSysadmin({ db, now = Date.now }) {
       FROM shipments WHERE status IN ('Delivery failed','Returning') ORDER BY updated_at DESC LIMIT 50`).all();
     return pending.map((s) => ({ id: s.id, type: 'shipment_exception', status: s.status, updatedAt: s.updatedAt }));
   }
-  return { snapshot, events, incidents, recordIncident, getIncident, changeIncident, trackedIncidents, incidentHistory, dataQuality, readiness };
+  return { snapshot, events, incidents, recordIncident, getIncident, changeIncident, trackedIncidents, incidentHistory, dataQuality, readiness, observeHttp, httpMetrics };
 }

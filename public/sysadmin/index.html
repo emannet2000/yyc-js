@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YYC Technical Operations Center</title><style>
+:root{font-family:system-ui,sans-serif;color-scheme:dark;background:#101820;color:#f5f7fa}
+body{max-width:1100px;margin:0 auto;padding:24px}a{color:#e6bb65}header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0}
+.card,section{background:#1b2935;border:1px solid #354553;border-radius:12px;padding:18px;margin-bottom:14px}
+.card strong{display:block;font-size:1.5rem;color:#e6bb65;margin-top:8px}
+table{width:100%;border-collapse:collapse}td,th{padding:9px;text-align:left;border-bottom:1px solid #354553}
+button{background:#d7ac58;color:#111;padding:10px 16px;border:0;border-radius:7px;cursor:pointer}
+.error{color:#ffb3a7}small{color:#aab8c4}section{overflow-x:auto}
+</style></head><body>
+<header><div><h1>YYC Technical Operations Center</h1><small>Read-only system diagnostics · Administrator access required</small></div><a href="/react/">Back to YYC</a></header>
+<p id="message" role="status">Checking your session…</p>
+<div class="cards" id="metrics"></div>
+<section><h2>Service health</h2><div id="health"></div></section>
+<section><h2>Shipment exceptions</h2><div id="incidents"></div></section>
+<section><h2>Recent shipment events</h2><div id="events"></div></section>
+<button id="refresh">Refresh diagnostics</button>
+<script type="module">
+const el=id=>document.getElementById(id);
+const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function json(path){const r=await fetch(path,{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error(r.status===401?'Sign in through YYC first.':r.status===403?'This page requires an administrator account.':'Request failed ('+r.status+').');return r.json();}
+const table=(headers,rows)=>'<table><thead><tr>'+headers.map(x=>'<th>'+escape(x)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(v=>'<td>'+escape(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+async function refresh(){
+el('message').textContent='Loading diagnostics…';
+try{
+const session=await json('/api/session');if(session.user?.role!=='admin')throw Error('Sign in with an administrator account in the YYC workspace.');
+const [overview,events,incidents]=await Promise.all([json('/api/sysadmin/overview'),json('/api/sysadmin/events'),json('/api/sysadmin/incidents')]);
+const metrics={...overview.counts,'Memory (MB)':Math.round(overview.runtime.memoryRssBytes/1048576),'Uptime (s)':overview.uptimeSeconds,'Event loop (ms)':overview.runtime.eventLoopDelayMeanMs};
+el('metrics').innerHTML=Object.entries(metrics).map(([k,v])=>'<div class="card">'+escape(k)+'<strong>'+escape(v)+'</strong></div>').join('');
+el('health').innerHTML=table(['Service','Status'],Object.entries(overview.services));
+el('incidents').innerHTML=incidents.incidents.length?table(['Shipment','Exception','Updated'],incidents.incidents.map(x=>[x.id,x.status,x.updatedAt])):'No tracked shipment exceptions.';
+el('events').innerHTML=table(['Time','Shipment','Event'],events.events.map(x=>[x.createdAt,x.shipmentId,x.event]));
+el('message').textContent='Last checked: '+overview.checkedAt;
+}catch(e){el('message').textContent=e.message;el('message').className='error';['metrics','health','incidents','events'].forEach(id=>el(id).replaceChildren());}}
+el('refresh').addEventListener('click',refresh);refresh();
+</script></body></html>

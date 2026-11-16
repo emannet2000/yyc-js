@@ -13,6 +13,7 @@ button{background:#d7ac58;color:#111;padding:10px 16px;border:0;border-radius:7p
 <header><div><h1>YYC Technical Operations Center</h1><small>Read-only system diagnostics · Administrator access required</small></div><a href="/react/">Back to YYC</a></header>
 <p id="message" role="status">Checking your session…</p>
 <div class="cards" id="metrics"></div>
+<section><h2>Data integrity & release readiness</h2><div id="quality"></div><div id="readiness"></div></section>
 <section><h2>Service health</h2><div id="health"></div></section>
 <section><h2>Incident management</h2><form id="new-incident"><input name="title" required maxlength="160" placeholder="Incident title"><select name="severity"><option>low</option><option>medium</option><option selected>high</option><option>critical</option></select><input name="details" required maxlength="2000" placeholder="Description"><button type="submit">Create incident</button></form><div id="tracked"></div></section>
 <section><h2>Shipment exceptions</h2><div id="incidents"></div></section>
@@ -27,15 +28,17 @@ async function refresh(){
 el('message').textContent='Loading diagnostics…';
 try{
 const session=await json('/api/session');if(session.user?.role!=='admin')throw Error('Sign in with an administrator account in the YYC workspace.');
-const [overview,events,incidents,tracked]=await Promise.all([json('/api/sysadmin/overview'),json('/api/sysadmin/events'),json('/api/sysadmin/incidents'),json('/api/sysadmin/incident-records')]);
+const [overview,events,incidents,tracked,quality,readiness]=await Promise.all([json('/api/sysadmin/overview'),json('/api/sysadmin/events'),json('/api/sysadmin/incidents'),json('/api/sysadmin/incident-records'),json('/api/sysadmin/data-quality'),json('/api/sysadmin/readiness')]);
 const metrics={...overview.counts,'Memory (MB)':Math.round(overview.runtime.memoryRssBytes/1048576),'Uptime (s)':overview.uptimeSeconds,'Event loop (ms)':overview.runtime.eventLoopDelayMeanMs};
 el('metrics').innerHTML=Object.entries(metrics).map(([k,v])=>'<div class="card">'+escape(k)+'<strong>'+escape(v)+'</strong></div>').join('');
+el('quality').innerHTML=table(['Data quality check','Result'],Object.entries(quality).filter(([k])=>!['checkedAt','healthy'].includes(k)).map(([k,v])=>[k,v]));
+el('readiness').innerHTML='<p>Release ready: <strong>'+ (readiness.ready?'Yes':'Not verified') +'</strong></p>'+table(['Readiness check','Verified'],Object.entries(readiness.checks).map(([k,v])=>[k,v===null?'Not checked':v?'Pass':'Fail']));
 el('health').innerHTML=table(['Service','Status'],Object.entries(overview.services));
 el('tracked').innerHTML=tracked.incidents.length?table(['Title','Severity','Status','Updated'],tracked.incidents.map(x=>[x.title,x.severity,x.status,x.updatedAt])):'No incidents recorded.';
 el('incidents').innerHTML=incidents.incidents.length?table(['Shipment','Exception','Updated'],incidents.incidents.map(x=>[x.id,x.status,x.updatedAt])):'No tracked shipment exceptions.';
 el('events').innerHTML=table(['Time','Shipment','Event'],events.events.map(x=>[x.createdAt,x.shipmentId,x.event]));
 el('message').textContent='Last checked: '+overview.checkedAt;
-}catch(e){el('message').textContent=e.message;el('message').className='error';['metrics','health','incidents','events','tracked'].forEach(id=>el(id).replaceChildren());}}
+}catch(e){el('message').textContent=e.message;el('message').className='error';['metrics','health','incidents','events','tracked','quality','readiness'].forEach(id=>el(id).replaceChildren());}}
 el('refresh').addEventListener('click',refresh);
 el('new-incident').addEventListener('submit',async e=>{
 e.preventDefault();const form=e.currentTarget;const fields=new FormData(form);

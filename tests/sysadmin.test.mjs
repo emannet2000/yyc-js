@@ -30,3 +30,21 @@ test('SysAdmin overview and events report persisted shipment changes', async (t)
   const incidents = (await f.admin('/api/sysadmin/incidents')).value;
   assert.ok(Array.isArray(incidents.incidents));
 });
+
+test('incident records require admin, validate input, and persist status changes', async (t) => {
+  const f = await setup(t);
+  const path = '/api/sysadmin/incident-records';
+  const payload = { title: 'Tracking delayed', details: 'Investigate stale device updates', severity: 'high' };
+  assert.equal((await f.store(path, 'POST', payload)).status, 403);
+  assert.equal((await f.admin(path, 'POST', { ...payload, severity: 'invalid' })).status, 400);
+  const created = await f.admin(path, 'POST', payload);
+  assert.equal(created.status, 201);
+  assert.equal(created.value.status, 'open');
+  const id = created.value.id;
+  assert.ok((await f.admin(path)).value.incidents.some((x) => x.id === id));
+  const updated = await f.admin(path + '/' + id + '/status', 'POST', { status: 'acknowledged' });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.value.status, 'acknowledged');
+  assert.equal((await f.admin(path + '/' + id + '/status', 'POST', { status: 'bad' })).status, 400);
+  assert.equal((await f.admin(path + '/not-an-incident/status', 'POST', { status: 'resolved' })).status, 405);
+});

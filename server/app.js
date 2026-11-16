@@ -1349,12 +1349,27 @@ export function createApplication({
       }
       if (path.startsWith('/api/sysadmin/')) {
         requireThat(user.role === 'admin', 403, 'Administrator access required.');
-        requireThat(req.method === 'GET', 405, 'SysAdmin endpoints are read-only.');
         res.setHeader('Cache-Control', 'no-store');
-        if (path === '/api/sysadmin/overview') send(res, 200, sysadmin.snapshot());
-        else if (path === '/api/sysadmin/events') send(res, 200, { events: sysadmin.events() });
-        else if (path === '/api/sysadmin/incidents') send(res, 200, { incidents: sysadmin.incidents() });
-        else throw new HttpError(404, 'SysAdmin endpoint not found.');
+        if (req.method === 'GET') {
+          if (path === '/api/sysadmin/overview') send(res, 200, sysadmin.snapshot());
+          else if (path === '/api/sysadmin/events') send(res, 200, { events: sysadmin.events() });
+          else if (path === '/api/sysadmin/incidents') send(res, 200, { incidents: sysadmin.incidents() });
+          else if (path === '/api/sysadmin/incident-records') send(res, 200, { incidents: sysadmin.trackedIncidents() });
+          else throw new HttpError(404, 'SysAdmin endpoint not found.');
+        } else if (req.method === 'POST' && path === '/api/sysadmin/incident-records') {
+          const data = await readBody(req);
+          const title = text(data, 'title');
+          const details = text(data, 'details');
+          const severity = choice(data, 'severity', ['low','medium','high','critical']);
+          requireThat(title.length <= 160, 400, 'Incident title is too long.');
+          send(res, 201, sysadmin.recordIncident({ id: randomUUID(), title, details, severity, actorId: user.id }));
+        } else if (req.method === 'POST' && /^\\/api\\/sysadmin\\/incident-records\\/[a-f0-9-]+\\/status$/.test(path)) {
+          const data = await readBody(req);
+          const status = choice(data, 'status', ['open','acknowledged','resolved']);
+          const id = path.split('/')[4];
+          requireThat(sysadmin.getIncident(id), 404, 'Incident not found.');
+          send(res, 200, sysadmin.changeIncident({ id, status, actorId: user.id }));
+        } else throw new HttpError(405, 'Method not allowed.');
         return;
       }
       if (path === '/api/state' && req.method === 'GET') {

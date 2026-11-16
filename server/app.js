@@ -1355,6 +1355,13 @@ export function createApplication({
           else if (path === '/api/sysadmin/events') send(res, 200, { events: sysadmin.events() });
           else if (path === '/api/sysadmin/incidents') send(res, 200, { incidents: sysadmin.incidents() });
           else if (path === '/api/sysadmin/incident-records') send(res, 200, { incidents: sysadmin.trackedIncidents() });
+          else if (path === '/api/sysadmin/data-quality') send(res, 200, sysadmin.dataQuality());
+          else if (path === '/api/sysadmin/readiness') send(res, 200, sysadmin.readiness());
+          else if (/^\/api\/sysadmin\/incident-records\/[a-f0-9-]+\/history$/.test(path)) {
+            const id = path.split('/')[4];
+            requireThat(sysadmin.getIncident(id), 404, 'Incident not found.');
+            send(res, 200, { events: sysadmin.incidentHistory(id) });
+          }
           else throw new HttpError(404, 'SysAdmin endpoint not found.');
         } else if (req.method === 'POST' && path === '/api/sysadmin/incident-records') {
           const data = await readBody(req);

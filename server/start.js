@@ -4,6 +4,7 @@ import { configuredWebhook, configuredBackupUpload } from './integrations.js';
 import { configuredResetDelivery } from './reset-delivery.js';
 import { createRoadRouter } from './routing.js';
 import { createApplication } from './app.js';
+import { startObservationWorker } from './observation-worker.js';
 const app = createApplication({
   calculateRoute: createRoadRouter(),
   databasePath: process.env.DATABASE_PATH,
@@ -15,6 +16,10 @@ const app = createApplication({
 });
 const port = Number(process.env.PORT || 3000),
   host = process.env.HOST || '0.0.0.0';
+const stopObservations = startObservationWorker({
+  sample: app.sampleObservations,
+  intervalMs: Number(process.env.METRICS_SAMPLE_INTERVAL_MS ?? 60000),
+});
 app.server.listen(port, host, () =>
   console.log(`YYC workspace: http://${host}:${port}/react/`),
 );
@@ -43,6 +48,7 @@ const notificationTimer = setInterval(() => {
 }, 30000);
 notificationTimer.unref();
 function shutdown() {
+  stopObservations();
   clearInterval(backupTimer);
   clearInterval(notificationTimer);
   app.server.close(() => {

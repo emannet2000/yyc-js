@@ -150,7 +150,7 @@ export function createMobility({
       expiresAt: link.expires_at,
     });
   }
-  async function route(path, req, res, user, _data) {
+  async function route(path, req, res, user, data = {}) {
     const match = /^\/api\/shipments\/([^/]+)\/(route|recipient-link)$/.exec(path);
     if (!match) return false;
     const s = shipments(user, match[1], false)[0];
@@ -192,10 +192,10 @@ export function createMobility({
       'Only broker or assigned driver can calculate routing.',
     );
     requireThat(!terminal.includes(s.status), 409, 'Delivery is already complete.');
-    send(res, 200, await routeFor(s, user));
+    send(res, 200, await routeFor(s, user, data));
     return true;
   }
-  async function routeFor(s, user) {
+  async function routeFor(s, user, options = {}) {
     requireThat(
       calculateRoute,
       503,
@@ -206,6 +206,19 @@ export function createMobility({
     let result;
     try {
       const previous = tracking(s.id);
+      const timing = {
+        stopServiceMinutes:
+          options.stopServiceMinutes ?? previous.etaTiming?.stopServiceMinutes ?? 0,
+        unloadingMinutes:
+          options.unloadingMinutes ?? previous.etaTiming?.unloadingMinutes ?? 0,
+      };
+      requireThat(
+        Object.values(timing).every(
+          (value) => Number.isInteger(value) && value >= 0 && value <= 240,
+        ),
+        400,
+        'Stop and unloading times must be whole minutes from 0 to 240.',
+      );
       const recent =
         s.driverId &&
         ['Assigned', 'In transit', 'Delivery failed', 'Returning'].includes(s.status) &&
@@ -277,11 +290,33 @@ export function createMobility({
         };
         // ETA describes the next stop, including the configured travel buffer.
         const seconds = calculated.legs[0]?.durationSeconds || 0;
+        const bufferSeconds = (s.travelBufferMinutes || 0) * 60;
+        const stopServiceSeconds =
+          remaining.filter((point) => point.id !== 'destination' && point.id !== 'return')
+            .length *
+          timing.stopServiceMinutes *
+          60;
+        const unloadingSeconds = timing.unloadingMinutes * 60;
         const eta = recent
           ? new Date(
               now() + (seconds + (s.travelBufferMinutes || 0) * 60) * 1000,
             ).toISOString()
           : null;
+        const destinationEta = recent
+          ? new Date(
+              now() +
+                (calculated.durationSeconds + bufferSeconds + stopServiceSeconds) * 1000,
+            ).toISOString()
+          : null;
+        const completionEta = destinationEta
+          ? new Date(Date.parse(destinationEta) + unloadingSeconds * 1000).toISOString()
+          : null;
+        const etaBreakdown = {
+          drivingSeconds: calculated.durationSeconds,
+          bufferSeconds,
+          stopServiceSeconds,
+          unloadingSeconds,
+        };
         db.prepare(
           'INSERT INTO tracking VALUES (?,?) ON CONFLICT(shipment_id) DO UPDATE SET data=excluded.data',
         ).run(
@@ -290,11 +325,22 @@ export function createMobility({
             ...t,
             route,
             eta,
+            destinationEta,
+            completionEta,
+            etaTiming: timing,
+            etaBreakdown,
             etaUpdatedAt: new Date(now()).toISOString(),
             etaSource: 'road-route',
           }),
         );
-        result = { ...route, eta };
+        result = {
+          ...route,
+          eta,
+          destinationEta,
+          completionEta,
+          etaTiming: timing,
+          etaBreakdown,
+        };
       });
     } finally {
       busyRoutes.delete(s.id);

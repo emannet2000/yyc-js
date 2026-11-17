@@ -280,7 +280,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             return;
           } catch (e) {
             if (!isConnectionFailure(e)) {
-              if (e instanceof ApiError && e.status < 500)
+              // Only discard when the request itself is permanently invalid.
+              // 401/429 mean retry later with a live session, not that the action is bad.
+              if (
+                e instanceof ApiError &&
+                [400, 403, 409, 422].includes(e.status)
+              )
                 discardPending(owner, entry.requestKey);
               throw e;
             }

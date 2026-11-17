@@ -117,6 +117,60 @@ test('driver location watch survives closing drawer and stops on completed deliv
   await ui.wait(() => clears === 1);
   assert.ok(!ui.doc.body.textContent.includes('Location sharing active'));
 });
+test('driver shares phone GPS from map and new coordinates appear without waiting for polling', async (t) => {
+  const f = await assigned(t);
+  let position,
+    failure,
+    clears = 0;
+  const ui = await renderApp(t, f.driver, {
+    beforeRender(window) {
+      Object.defineProperty(window.navigator, 'geolocation', {
+        value: {
+          watchPosition(success, error, options) {
+            assert.equal(options.enableHighAccuracy, true);
+            position = success;
+            failure = error;
+            return 7;
+          },
+          clearWatch(id) {
+            assert.equal(id, 7);
+            clears++;
+          },
+        },
+      });
+    },
+  });
+  await ui.wait(() => ui.button('Share phone GPS'));
+  assert.ok(ui.doc.body.textContent.includes('Driver map'));
+  const navigation = [...ui.doc.querySelectorAll('a')].find((link) =>
+    link.textContent.includes('Navigate to next stop'),
+  );
+  assert.equal(
+    new URL(navigation.href).searchParams.get('destination'),
+    booking().pickup,
+  );
+  assert.ok(ui.button('Update mapped road route'));
+  assert.equal(position, undefined);
+  ui.button('Share phone GPS').click();
+  await ui.wait(() => typeof position === 'function');
+  position({
+    coords: { latitude: 51.08, longitude: -114.09, accuracy: 8 },
+    timestamp: Date.now(),
+  });
+  await ui.wait(() => ui.doc.querySelector('a[href*="mlat=51.08&mlon=-114.09"]'));
+  const shared = (await f.store(`/api/shipments/${f.id}/tracking`)).value;
+  assert.equal(shared.latitude, 51.08);
+  assert.equal(shared.accuracy, 8);
+  assert.ok(ui.button('Following driver · Recenter'));
+  failure({ code: 1 });
+  await ui.wait(() =>
+    ui.doc.body.textContent.includes('Location permission or GPS is unavailable'),
+  );
+  ui.button('Stop sharing phone GPS').click();
+  await ui.wait(() => clears === 1);
+  position({ coords: { latitude: 1, longitude: 1, accuracy: 1 }, timestamp: Date.now() });
+  assert.equal((await f.store(`/api/shipments/${f.id}/tracking`)).value.latitude, 51.08);
+});
 test('recipient view opens without login and removes bearer token from address bar', async (t) => {
   const f = await assigned(t),
     link = (await f.store(`/api/shipments/${f.id}/recipient-link`, 'POST', {})).value.url;
@@ -162,20 +216,10 @@ test('offline sync stops on stale assignment instead of overwriting broker revis
   );
 });
 
-test('assigned driver creates a native phone pairing code from the delivery drawer', async (t) => {
+test('PWA delivery controls keep native Android pairing deferred', async (t) => {
   const f = await assigned(t),
     ui = await renderApp(t, f.driver);
   await ui.drawer();
-  ui.button('Pair Android phone').click();
-  await ui.wait(() => ui.doc.querySelector('.native-pairing input'));
-  const code = ui.doc.querySelector('.native-pairing input').value;
-  assert.match(code, /^[a-f0-9]{6}(?:-[a-f0-9]{6}){3}$/);
-  const guest = f.client();
-  const pair = await guest('/api/mobile/pair', 'POST', { code, name: 'Driver Android' });
-  assert.equal(pair.status, 201);
-  const headers = { Authorization: `Bearer ${pair.value.token}` };
-  assert.equal(
-    (await guest('/api/mobile/status', 'GET', undefined, headers)).status,
-    200,
-  );
+  assert.equal(ui.button('Pair Android phone'), undefined);
+  assert.ok(ui.button('Share current location'));
 });

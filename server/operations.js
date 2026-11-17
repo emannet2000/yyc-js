@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { isPositiveMoney } from '../shared/money.js';
+import { createDeliveryMonitor } from './delivery-monitor.js';
 
 export function createOperations({
   db,
@@ -38,6 +39,7 @@ export function createOperations({
       sendNotification ? 'pending' : 'in-app',
     );
   }
+  const deliveryMonitor = createDeliveryMonitor({ db, now, notify, transaction });
   function notifyShipment(s, message) {
     const recipients = new Set([
       s.storeId,
@@ -203,6 +205,7 @@ export function createOperations({
       .map((row) => invoiceView(row, user));
   }
   async function processNotifications() {
+    deliveryMonitor.notifyUpdates();
     if (!sendNotification) return;
     const pending = db
       .prepare(
@@ -234,8 +237,54 @@ export function createOperations({
     }
   }
   async function route(path, req, res, user, data, url) {
+    if (
+      path === '/api/broker-alerts' ||
+      /^\/api\/broker-alerts\/[a-f0-9]{64}\/acknowledge$/.test(path)
+    ) {
+      requireThat(user.role === 'admin', 403, 'Only brokers can manage delivery alerts.');
+      if (path === '/api/broker-alerts') {
+        requireThat(req.method === 'GET', 405, 'Use GET.');
+        send(res, 200, { alerts: deliveryMonitor.alerts() });
+      } else {
+        requireThat(req.method === 'POST', 405, 'Use POST.');
+        const alert = deliveryMonitor.acknowledge(path.split('/')[3], user.id);
+        requireThat(alert, 404, 'Alert is no longer active.');
+        send(res, 200, alert);
+      }
+      return true;
+    }
     const admin = () =>
       requireThat(user.role === 'admin', 403, 'Broker access required.');
+    if (path === '/api/fleet/tracking') {
+      requireThat(user.role === 'admin', 403, 'Only brokers can view fleet tracking.');
+      requireThat(req.method === 'GET', 405, 'Method not allowed.');
+      const rows = db
+        .prepare(
+          `SELECT s.id AS shipmentId,s.driver_id AS driverId,
+        u.name AS driverName,s.status,t.data FROM shipments s
+        JOIN users u ON u.id=s.driver_id LEFT JOIN tracking t ON t.shipment_id=s.id
+        WHERE s.status IN ('Assigned','In transit','Delivery failed','Returning')
+        ORDER BY s.updated_at DESC,s.id LIMIT 501`,
+        )
+        .all();
+      send(res, 200, {
+        truncated: rows.length > 500,
+        deliveries: rows.slice(0, 500).map((row) => {
+          const point = row.data ? JSON.parse(row.data) : {};
+          return {
+            shipmentId: row.shipmentId,
+            driverId: row.driverId,
+            driverName: row.driverName,
+            status: row.status,
+            latitude: point.latitude,
+            longitude: point.longitude,
+            recordedAt: point.recordedAt,
+            accuracy: point.accuracy,
+          };
+        }),
+      });
+      return true;
+    }
     const tracking = /^\/api\/shipments\/([^/]+)\/tracking$/.exec(path);
     if (tracking) {
       const s = shipments(user, tracking[1], false)[0];
@@ -310,6 +359,9 @@ export function createOperations({
           'Choose an ETA within the next 30 days.',
         );
         Object.assign(current, { eta, etaUpdatedAt: timestamp(), etaSource: 'manual' });
+        delete current.destinationEta;
+        delete current.completionEta;
+        delete current.etaBreakdown;
       } else return false;
       db.prepare(
         'INSERT INTO tracking VALUES (?,?) ON CONFLICT(shipment_id) DO UPDATE SET data=excluded.data',

@@ -4,13 +4,14 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type MouseEvent,
   type ReactNode,
 } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Journey, RecipientTracking, DriverTracking, OfflinePanel } from './Mobility';
+import { LiveMap } from './LiveMap';
 import { nextStep } from './workflow';
 import { WorkflowGuide, AttentionQueue, DispatchReadiness } from './WorkflowGuide';
-import { NativeTracking } from './NativeTracking';
 import { api, setCsrf } from './api';
 import { Field } from './Field';
 import { ActionForm } from './ActionForm';
@@ -44,10 +45,19 @@ const money = (value?: number | null) =>
         style: 'currency',
         currency: 'CAD',
       }).format(value);
-function Logo() {
+function Logo({ onClick }: { onClick?: (event: MouseEvent<HTMLButtonElement>) => void }) {
+  const image = (
+    <img src="/assets/yyc-brokers-logo.jpg" alt="YYC Brokers" width="88" height="88" />
+  );
   return (
     <div className="logo brandlogo">
-      <img src="/assets/yyc-brokers-logo.jpg" alt="YYC Brokers" width="88" height="88" />
+      {onClick ? (
+        <button type="button" className="logo-trigger" onClick={onClick}>
+          {image}
+        </button>
+      ) : (
+        image
+      )}
       <span className="brandword">
         YYC BROKERS<small>TRUCKING & DELIVERY</small>
       </span>
@@ -99,17 +109,6 @@ function Route({ shipment: s }: { shipment: Shipment }) {
     </div>
   );
 }
-function NoMap() {
-  return (
-    <div className="unconnectedmap">
-      <h2>Delivery tracking</h2>
-      <p>
-        Open a delivery to view its milestones, ETA, and last location shared by the
-        assigned driver.
-      </p>
-    </div>
-  );
-}
 function Form({
   children,
   onSave,
@@ -142,6 +141,7 @@ function Auth({
   notify: (message: string) => void;
 }) {
   const [forgot, setForgot] = useState(false);
+  const [logoClicks, setLogoClicks] = useState(0);
   const [register, setRegister] = useState(false),
     [role, setRole] = useState('store'),
     [busy, setBusy] = useState(false),
@@ -175,7 +175,12 @@ function Auth({
   return (
     <div className="auth">
       <section className="hero">
-        <Logo />
+        <Logo
+          onClick={(event) => {
+            if (event.ctrlKey && event.shiftKey)
+              setLogoClicks((count) => Math.min(count + 1, 6));
+          }}
+        />
         <div>
           <div className="eyebrow">YYC BROKERS</div>
           <h1>
@@ -196,7 +201,7 @@ function Auth({
       <section className="authright">
         <header>
           <span>YYC WORKSPACE</span>
-          <a href="/demo/">Open screen demo →</a>
+          {logoClicks >= 6 && <a href="/demo/">Open screen demo →</a>}
         </header>
         <div className="authbox">
           <h1>{register ? 'Create your YYC account.' : 'Log in to your workspace.'}</h1>
@@ -788,7 +793,6 @@ function Delivery({
         <WorkflowActions s={s} user={user} busy={busy} act={act} />
         <Journey s={s} user={user} />
         <LocationTracker s={s} user={user} />
-        <NativeTracking s={s} user={user} />
         <EvidenceFiles s={s} user={user} busy={busy} save={useAppStore.getState().save} />
         {s.deliveryDeadline && (
           <p>Delivery deadline: {s.deliveryDeadline} (Edmonton time)</p>
@@ -1304,6 +1308,9 @@ function App() {
               </div>
             ) : (
               <>
+                {['dashboard', 'tracking'].includes(page) && (
+                  <LiveMap shipments={filtered} user={user} onOpen={select} />
+                )}
                 {page === 'dashboard' && (
                   <>
                     <section className="overview-hero">
@@ -1449,11 +1456,6 @@ function App() {
                   </div>
                 ) : (
                   cards(displayed)
-                )}
-                {['dashboard', 'tracking'].includes(page) && (
-                  <section className="card mapcard">
-                    <NoMap />
-                  </section>
                 )}
               </>
             )}

@@ -630,6 +630,10 @@ export function DriverTracking({
   shipments: Shipment[];
 }) {
   const { owner, shipment, error, stop, report } = useTracking();
+  const [lastUploadedAt, setLastUploadedAt] = useState('');
+  const [hidden, setHidden] = useState(() => document.visibilityState === 'hidden');
+  const [keepAwake, setKeepAwake] = useState(false);
+  const [wakeMessage, setWakeMessage] = useState('');
   const job = shipments.find(
     (s) =>
       s.id === shipment &&
@@ -637,6 +641,37 @@ export function DriverTracking({
       ['Assigned', 'In transit', 'Delivery failed', 'Returning'].includes(s.status),
   );
   const eligible = owner === user.id && user.role === 'driver' && !!job;
+  useEffect(() => {
+    if (!eligible || !keepAwake || hidden || !navigator.wakeLock) return;
+    let active = true;
+    let lock: WakeLockSentinel | undefined;
+    void navigator.wakeLock
+      .request('screen')
+      .then((value) => {
+        if (!active) {
+          void value.release();
+          return;
+        }
+        lock = value;
+        setWakeMessage('Screen wake lock acquired. Battery saver may release it.');
+        value.addEventListener('release', () => {
+          if (active)
+            setWakeMessage(
+              'Screen wake lock released by the device. Keep this page visible for GPS.',
+            );
+        });
+      })
+      .catch(() => {
+        if (active)
+          setWakeMessage(
+            'The device could not keep the screen awake. Check battery saver and keep this page visible.',
+          );
+      });
+    return () => {
+      active = false;
+      void lock?.release();
+    };
+  }, [eligible, keepAwake, hidden]);
   useEffect(() => {
     if (!eligible) {
       stop();
@@ -650,12 +685,21 @@ export function DriverTracking({
       lastSent = 0,
       sending = false;
     const storageKey = `yyc-location:${user.id}`;
+    setLastUploadedAt('');
     async function flush() {
       if (cancelled || sending || !navigator.onLine) return;
-      const raw = localStorage.getItem(storageKey);
+      let raw, point;
+      try {
+        raw = localStorage.getItem(storageKey);
+        point = raw ? JSON.parse(raw) : null;
+      } catch {
+        report('Saved GPS sample could not be read. A fresh location will replace it.');
+        return;
+      }
       if (!raw) return;
-      const point = JSON.parse(raw);
       if (
+        !point ||
+        !Number.isFinite(Date.parse(point.recordedAt)) ||
         point.shipment !== shipment ||
         Date.now() - Date.parse(point.recordedAt) > 5 * 60000
       ) {
@@ -666,9 +710,23 @@ export function DriverTracking({
       try {
         await api(`/api/shipments/${shipment}/tracking`, 'POST', point);
         if (cancelled) return;
+        window.dispatchEvent(
+          new CustomEvent('yyc-location-updated', { detail: shipment }),
+        );
         if (localStorage.getItem(storageKey) === raw) localStorage.removeItem(storageKey);
         report('');
+        setLastUploadedAt(new Date().toLocaleTimeString());
       } catch (e) {
+        if (!cancelled && e instanceof ApiError && [401, 403, 404].includes(e.status)) {
+          stop();
+          return;
+        }
+        if (!cancelled && e instanceof ApiError && [400, 409].includes(e.status)) {
+          if (localStorage.getItem(storageKey) === raw)
+            localStorage.removeItem(storageKey);
+          report('Saved GPS sample was rejected. Waiting for a fresh position.');
+          return;
+        }
         if (!cancelled) report(`Location waiting to sync: ${(e as Error).message}`);
       } finally {
         sending = false;
@@ -696,19 +754,29 @@ export function DriverTracking({
           );
         }
       },
-      () =>
+      (failure) =>
         report(
-          'Location permission or GPS is unavailable. Check device permissions and retry.',
+          failure.code === 1
+            ? 'Location permission or GPS is unavailable. Allow location access in this browser’s site settings, then stop and restart sharing.'
+            : failure.code === 3
+              ? 'GPS timed out. Move to an open area and keep the PWA visible; tracking will retry.'
+              : 'Location permission or GPS is unavailable. Check device permissions and retry.',
         ),
       { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 },
     );
     const resume = () => void flush();
+    const visible = () => {
+      setHidden(document.visibilityState === 'hidden');
+      if (document.visibilityState !== 'hidden') void flush();
+    };
     window.addEventListener('online', resume);
+    document.addEventListener('visibilitychange', visible);
     const timer = setInterval(resume, 30000);
     return () => {
       cancelled = true;
       navigator.geolocation.clearWatch(watch);
       window.removeEventListener('online', resume);
+      document.removeEventListener('visibilitychange', visible);
       clearInterval(timer);
       localStorage.removeItem(storageKey);
     };
@@ -729,6 +797,29 @@ export function DriverTracking({
           Keep this app open. Phone locking or closing the browser can suspend location
           sharing.
         </p>
+        <p role="status">
+          {hidden
+            ? 'PWA is hidden. GPS may pause until you return.'
+            : lastUploadedAt
+              ? `Last successful GPS upload: ${lastUploadedAt}`
+              : 'Waiting for the first successful GPS upload.'}
+        </p>
+        {'wakeLock' in navigator && (
+          <>
+            <button
+              type="button"
+              className="btn light"
+              aria-pressed={keepAwake}
+              onClick={() => {
+                setKeepAwake((value) => !value);
+                setWakeMessage('');
+              }}
+            >
+              {keepAwake ? 'Allow screen to sleep' : 'Keep screen awake while sharing'}
+            </button>
+            {keepAwake && wakeMessage && <p>{wakeMessage}</p>}
+          </>
+        )}
         {error && <p role="alert">{error}</p>}
       </div>
       <button className="btn light" onClick={stop}>

@@ -1,6 +1,12 @@
 # YYC Technical Operations Center — implementation roadmap
 
 ## Delivered in this branch
+- Persistent operational metrics history with manual snapshots and automatic collection
+  at server startup and every 60 seconds. Configure `METRICS_SAMPLE_INTERVAL_MS`
+  (integer milliseconds, 1,000–2,147,483,647); the newest 2,000 samples are retained.
+  HTTP counters reset on process restart, so historical totals are per-process
+  cumulative counts rather than interval rates. Collection failures log a generic
+  message and retry on the next tick; shutdown cancels collection before closing SQLite.
 - Browser dashboard at `/sysadmin/` with a manual refresh control
 - Session-authenticated, administrator-only read-only endpoints:
   - `GET /api/sysadmin/overview`
@@ -10,10 +16,12 @@
 - Existing shipment event audit timeline and exception views
 - Authorization and telemetry regression tests
 
-The current `admin` role is a brokerage administrator; it is **not** yet a dedicated technical administrator role. Access must be separated before exposing sensitive diagnostics to third-party brokers. Never publish diagnostic data or credentials. These endpoints deliberately provide no arbitrary SQL, shell, restart, or mutation functions.
+The `admin` role is a brokerage administrator. A separate `tech_admin` flag now gates `/api/sysadmin/*`: the first active broker on upgrade or install is granted it automatically to avoid lockout, and existing tech-admins can promote or revoke other brokers via `POST /api/sysadmin/tech-admins/{id}` with `{ techAdmin: boolean }`. The last active tech-admin cannot be demoted or disabled. `create-admin` accepts `ADMIN_TECH=true` to provision a new broker with tech access. MFA and reauthentication remain pending.
+
+Never publish diagnostic data or credentials. These endpoints deliberately provide no arbitrary SQL, shell, restart, or mutation functions.
 
 ## Phase 2 — security and incident foundation
-- Separate technical administrator role and privileges, MFA and reauthentication
+- MFA and reauthentication for technical administrators
 - Persistent incident records with lifecycle, acknowledgments, evidence, and audit
 - Structured logging with request correlation and PII redaction
 - Metrics retention, alert policies, service-level indicators and external uptime checks

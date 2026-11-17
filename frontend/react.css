@@ -1,3 +1,16 @@
+.logo-trigger {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.logo-trigger:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+}
 .sidebar {
   width: 252px;
   background: #10243b;
@@ -1593,4 +1606,134 @@ body {
   .attention-queue li .btn {
     width: 100%;
   }
+}
+.raster-map {
+  display: block;
+  width: 100%;
+  height: 380px;
+  border: 1px solid #ced9e8;
+  border-radius: 12px;
+  margin: 12px 0;
+  isolation: isolate;
+  z-index: 0;
+}
+.driver-map-pin {
+  background: #fff;
+  color: #176d48;
+  border: 3px solid #176d48;
+  border-radius: 50%;
+  text-align: center;
+  line-height: 22px;
+  box-shadow: 0 2px 6px #0005;
+}
+.live-map p {
+  margin: 10px 0;
+}
+.map-update-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.map-freshness {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #eaf4ee;
+  color: #155d3d;
+}
+.map-freshness.is-stale {
+  background: #fff3db;
+  color: #805000;
+}
+.driver-map-pin.is-stale {
+  border-color: #9a6700;
+  color: #9a6700;
+  background: #fff3db;
+}
+.raster-map.is-expanded {
+  height: 75vh;
+  min-height: 380px;
+}
+.map-delivery-summary {
+  margin: 16px 0;
+  padding: 16px;
+  background: #f3f6fa;
+  border-radius: 12px;
+}
+.map-delivery-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.map-delivery-summary dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin: 16px 0;
+}
+.map-delivery-summary dt {
+  font-size: 12px;
+  color: #52647a;
+}
+.map-delivery-summary dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+.fleet-filters {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.fleet-filters label {
+  flex: 1 1 180px;
+}
+.fleet-driver-list,
+.broker-alert-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+}
+.fleet-driver-list button,
+.broker-alert-list button {
+  width: 100%;
+  text-align: left;
+}
+.broker-alerts {
+  padding: 16px;
+  margin: 16px 0;
+  border: 1px solid #e4c987;
+  border-radius: 12px;
+  background: #fffaf0;
+}
+.delivery-alert-item {
+  padding: 12px;
+  border: 1px solid #e4c987;
+  border-radius: 8px;
+  background: #fff;
+}
+.map-progress {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.map-progress li {
+  border-top: 4px solid #d4dce7;
+  padding-top: 8px;
+  font-size: 12px;
+  color: #52647a;
+}
+.map-progress li[data-complete='true'] {
+  border-color: #176d48;
+  color: #155d3d;
+  font-weight: 600;
 }

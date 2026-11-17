@@ -94,7 +94,7 @@ npx playwright install --with-deps chromium
 npm run test:browser
 ```
 
-The browser command builds the current frontend and runs four acceptance cases: a delivery lifecycle and account recovery/disable controls, each at desktop and mobile viewport sizes. It verifies native forms, navigation, cookie sessions, CSRF-protected mutations, exception resolution, delivery evidence, page errors and horizontal overflow. Playwright intercepts only HTTP transport and forwards every request to the real Node handler and an isolated SQLite database. It does not mock API responses. This allows the suite to run without opening an HTTP listening port; Chromium itself still needs normal OS process/IPC permissions.
+The browser command builds the current frontend and runs desktop and mobile viewport acceptance cases for the delivery lifecycle, account recovery, PWA offline shell and browser GPS. Workflow cases forward transport to the real Node handler and isolated SQLite. PWA cases use a loopback server to exercise the actual service worker, manifest and offline reload. Browser GPS coordinates are supplied by Playwright; this does not prove behavior on a locked physical phone. Chromium and the loopback server need normal OS process/network permissions.
 
 Use `npx playwright test --list` to inspect the registered cases. Reports and failure screenshots/traces are written to `playwright-report/` and `test-results/`. `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` optionally selects an already installed compatible Chromium. In this managed workspace, browser downloads failed DNS resolution; an npm-packaged Chromium fallback downloaded, but its launch failed with an OS `Operation not permitted` error. The suite is authored and discovers all four cases; local browser execution remains unverified.
 
@@ -157,17 +157,17 @@ For automatic road routing, configure both operator-managed HTTPS endpoints:
 - `GEOCODING_URL`: full URL of a Nominatim-compatible search endpoint.
 - `ROUTING_TOKEN`: optional bearer credential supplied to both services.
 
-Addresses and recent driver coordinates are sent to those configured services only when calculating a route. Choose providers with suitable usage limits and coverage. No public demo endpoint is used by default. As an alternative to these two endpoints, configure the hosted ORS provider described below. **Calculate road route and ETA** returns road distance and driving duration through the remaining stops in their chosen order. **Open route in maps** opens navigation separately. GPS sharing automatically refreshes routing at most once per minute. A next-stop ETA is published only with a driver sample less than five minutes old; planned-address routing provides duration without inventing a current arrival time. Manual ETA entry remains available. Estimates exclude live traffic, stop service times and truck-specific road restrictions. Progress and shipment revisions invalidate the previous route and ETA. Routing errors leave the delivery workflow available.
+Addresses and recent driver coordinates are sent to configured road services when calculating a route. No public demo routing endpoint is used by default. **Calculate road route and ETA** returns road distance and driving duration through the remaining stops; **Open route in maps** opens navigation separately. GPS sharing refreshes routing at most once per minute. A next-stop ETA requires a driver sample less than five minutes old; planned-address routing provides duration without inventing an arrival time. Manual ETA remains available. Mapped route controls accept whole service minutes per pickup/intermediate stop and final unloading minutes (0–240 each), retained across automatic route refreshes. Final arrival includes driving, the configured travel buffer and remaining stop service; completion additionally includes unloading. The map shows the calculation time and component minutes. Estimates exclude live traffic and do not certify truck-specific restrictions. Progress invalidates route/arrival/completion estimates. Routing errors leave delivery actions available.
 
 Brokers and booking stores can create or revoke a **Recipient tracking link**. Links expire in seven days and rotation invalidates the previous link. Recipients do not log in: they see shipment ID, status, pickup date/window, intermediate stop counts and next-stop ETA. They do not receive customer accounts, contact details, cargo, rates, files, other stop addresses or precise driver coordinates. Tokens are random, stored hashed in SQLite and carried in a URL fragment that the recipient page removes from history. Link lookups use a read-only POST to avoid putting secrets in API access logs. Backup restore revokes these links.
 
-**Share current location** now runs at workspace level, so closing the delivery drawer or navigating between pages keeps the watch active. A visible workspace banner lets the driver stop sharing. Completion, lost assignment, account changes, session rejection and logout stop the watch. One recent location sample is buffered locally during a network interruption and discarded after five minutes. HTTPS and device location permission are required outside localhost. Browsers can suspend GPS when the phone locks or the browser closes; the native Android companion below provides a location foreground service independent of this browser watch, subject to Android lifecycle limits.
+**Share current location** runs at workspace level, so closing the drawer or navigating pages keeps the watch active. The banner shows the last successful GPS upload and warns when the PWA is hidden. Completion, lost assignment, session rejection and logout stop the watch. One recent sample is buffered during a network interruption and discarded after five minutes; reconnecting or returning to the PWA retries valid buffered data. HTTPS and location permission are required. Optional **Keep screen awake** requests a screen wake lock while visible and releases it on hiding or stopping. Devices can reject or release it, including under battery saver. Screen lock, browser closure and OS suspension can pause PWA GPS; continuous background tracking is not guaranteed.
 
 Driver job acceptance/decline, arrival, pickup, intermediate stop completion, delivery, failed attempts, exception reports, return confirmation and evidence attachments use a persistent per-account offline queue. The workspace shows pending actions as provisional until the server confirms them. Reconnection triggers ordered replay after checking the live session. Unique request keys make retries safe after a lost response, including evidence uploads; version conflicts or lost assignments stop replay for explicit review. The driver can discard a conflicting action and later actions for that shipment. No stale action is forced onto a changed delivery.
 
 The production app caches its static shell with a service worker and the last driver workspace for up to 24 hours, allowing a previously loaded workspace to reopen offline. Queued actions remain scoped to the original account across reloads and logout; signing into another account cannot replay them. Logout clears the cached workspace and stops GPS. Browser storage must be available, and the queue is limited to 100 actions and the browser's storage quota; large evidence attachments can reach that quota sooner. An unsuccessful local save is shown as an error. Keep the device private until pending work is synced or discarded. First-time login, routing and recipient tracking require connectivity. Local DOM tests cover offline pickup/delivery replay, lost responses, stopped replay after a broker revision, recipient entry and location-watch lifetime; actual locked-phone background behavior is not claimed.
 
-## Hosted routing and Android companion
+## Hosted routing and deferred Android companion
 
 Set `ORS_API_KEY` to an [openrouteservice](https://openrouteservice.org/) API credential to enable its hosted address search and directions together. The default profile is `driving-hgv`; set `ORS_PROFILE=driving-car` if required. This uses generic truck routing, without vehicle dimensions, axle loads, hazmat or live traffic. `ORS_BASE_URL` optionally selects another compatible HTTPS origin. The existing `ROUTING_URL`/`GEOCODING_URL` adapter remains available when no ORS key is set. ORS address results are cached for 24 hours with a bounded cache and concurrent lookup deduplication. Provider errors and quota exhaustion do not discard GPS samples or block the delivery workflow.
 
@@ -175,11 +175,95 @@ Copy `.env.example` to an untracked `.env`, supply your own provider credential 
 
 Automatic ETA calculation now runs on the **server** after browser or native phone GPS submissions, at most once per minute per delivery. The browser does not need to remain open for a native location submission to update the ETA. Old automatic ETAs are hidden from recipients when their sample or calculation becomes stale. Manual calculation remains available in the delivery drawer.
 
-The native Android companion and build instructions are in [mobile/android/README.md](mobile/android/README.md). The driver can create a five-minute, one-time pairing code in an assigned delivery, pair the app, and explicitly start its foreground location service. Drivers and brokers can see paired phones, last connection times and revoke access from the delivery drawer. Device tokens are delivery-scoped and expire after seven days. The native app uses Android Keystore encryption, a persistent notification with Stop control, latest-sample retry buffering and authorization checks. Completion, assignment removal, account disabling, password recovery and restore revoke relevant device authorization.
+The current mobile product is the **PWA**, for drivers and store owners on supported phone browsers. Android native work is deferred and its pairing controls are hidden from the PWA. Existing native source and API tests remain for later development at [mobile/android/README.md](mobile/android/README.md); they are not a current field-validated release.
 
 Screen-lock and browser-independent tracking are implemented in the Android source, with Android lifecycle limits described in the mobile README. A local Android SDK build and real-phone acceptance have not been possible here; Gradle/SDK downloads fail DNS resolution. `.github/workflows/android.yml` defines an SDK build/lint job and debug APK artifact, but it has not been run on GitHub in this session. Do not treat the native source as a device-validated release or as a guarantee against Android force-stop, battery policy, permission removal, GPS/network loss or device shutdown.
 
 ## Guided handoffs and action queues
+
+The dashboard and tracking page include a delivery selector and an interactive
+OpenStreetMap showing the selected driver's last shared GPS position. Delivery details
+also embed the map. Positions refresh approximately every 30 seconds and are marked
+stale after five minutes. Drivers must enable location sharing for an active assignment;
+missing positions and failed requests show an explicit status. Existing shipment access
+checks apply to every location request. The map uses
+[Leaflet raster tiles](https://leafletjs.com/examples-v1/quick-start/) and HTML markers,
+so it does not require WebGL or canvas. Internet access is required for OpenStreetMap
+tiles; tile requests reveal the displayed area, without shipment identifiers or
+credentials. No API key is needed. Calgary remains visible when GPS is unavailable.
+
+On a phone, drivers can select an assigned delivery and tap **Share phone GPS** on
+the dashboard map, then allow the browser's location request. HTTPS is required
+outside localhost. High-accuracy GPS samples are uploaded at most every 30 seconds;
+the map refreshes after each successful upload. **Stop sharing phone GPS** stops
+the watch. Keep the browser open; locking or closing the phone can suspend updates.
+Brokers and stores view the authorized driver position without sharing their own GPS.
+Dragging the map pauses following; **Recenter on driver** resumes it.
+
+**Refresh location** checks the selected delivery immediately and shows the last
+successful check time. Offline viewers keep the last received position with an
+offline notice; reconnection checks for updates automatically. Position age updates
+even without new GPS samples: after five minutes the marker turns amber. Accuracy
+worse than 100 metres displays a warning alongside the reported accuracy.
+
+The selected delivery summary shows its driver, current status, pickup, destination,
+next stop, delivery window and open issue. **Open mapped delivery** opens the same
+delivery's details. **Enlarge map** expands the map to 75% of the viewport height;
+**Reduce map** or Escape restores its size. A saved arrival estimate appears when
+one is available, with its update time; it is not recalculated by the map.
+
+Brokers can switch to **Fleet view** to show the latest shared location per driver
+among the currently filtered active deliveries. Markers and the driver list open
+their associated delivery. **Fit all drivers** restores the fleet overview after
+panning. Locations refresh every 30 seconds; stale positions are amber and missing
+GPS positions are not plotted. The broker-only `/api/fleet/tracking` endpoint returns
+up to 500 active deliveries and reports when its result is truncated. Store and
+driver sessions cannot use this endpoint or the fleet view.
+
+Within the broker fleet view, search by driver, delivery reference, pickup or
+destination. The GPS filter separates recent, stale and missing positions. Drivers
+without GPS remain in the list with an **Open delivery** action, but have no map
+marker. Counts distinguish located drivers, stale positions and drivers without
+GPS; search and GPS filters apply to both the map and list. **Clear fleet filters**
+restores the fleet within the dashboard's existing delivery filters.
+
+Maps use the existing three roles: brokers (`admin`), drivers/truck owners (`driver`),
+and stores/store owners (`store`). Drivers have a next-stop navigation link and route
+calculation controls. Brokers retain dispatch and fleet monitoring. Store owners can
+select bookings before assignment and see progress and next-step guidance without
+GPS upload or route calculation controls. Saved GeoJSON road routes are drawn in
+blue with a **Fit road route** control when their shipment version matches; invalid
+geometry and routes for older shipment versions are omitted. Road routing still
+requires the configured server-side provider. No road geometry is invented when
+that provider is unavailable.
+
+## PWA delivery reliability and operations
+
+The install manifest and service worker provide a standalone PWA and offline shell.
+Cache Storage contains static shell assets, never account API responses. Existing
+driver-only offline workspace/action storage remains scoped to its account.
+
+Brokers see missing GPS after a five-minute assignment grace period, stale GPS,
+overdue planned arrival, and unresolved delivery issues in **Delivery alerts**.
+Acknowledgments persist in SQLite with the broker and time; they do not resolve
+the issue. Refreshed GPS or resolved shipment conditions remove the corresponding
+active alert. New stale GPS evidence requires a new acknowledgment. Stores and
+drivers cannot read or acknowledge broker alerts.
+
+Pickup and completion updates use the existing notification/audit workflow.
+The 30-second maintenance worker also sends store owners a deduplicated approaching
+arrival message (fresh GPS/estimate within 15 minutes, final leg, no open issue)
+and a delay message when a deadline/last planned arrival has passed. These signals
+are recorded transactionally to avoid duplicate messages after retries or restarts.
+In-app delivery works without credentials. External delivery requires the existing
+configured `NOTIFICATION_DELIVERY` webhook and its verified recipient transport;
+no new SMS/email provider or live recipient messages are provisioned by this change.
+
+Run `npm run pilot:check` for the automated PWA rehearsal and `npm run test:browser`
+for desktop/mobile browser checks. Field acceptance, including actual phone lock,
+battery saver and three supervised deliveries, is recorded separately in
+[PWA_PILOT_RUNBOOK.md](PWA_PILOT_RUNBOOK.md). Those field checks remain pending until
+performed on the supported devices and deployment.
 
 Dashboards now show a role-specific **Action required** queue, ordered with open exceptions and failed-delivery decisions first, followed by dispatch, quote review, and driver cargo tasks. All roles have a full action queue in navigation (the broker's **Work queue**). Waiting on another role and completed jobs are excluded from actionable queues. Driver guidance respects existing live-cargo commitments and approval holds.
 

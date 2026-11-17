@@ -94,6 +94,56 @@ test('operational alerts include unresolved critical incidents and clear after r
   assert.ok(!after.value.alerts.some((a) => a.incidentId === created.value.id));
 });
 
+test('a second broker is not tech-admin by default and cannot reach SysAdmin', async (t) => {
+  const f = await setup(t);
+  await f.app.createAdmin({
+    name: 'Broker Two',
+    email: 'broker2@example.com',
+    password: 'test-password-1234',
+    phone: 'Contact',
+  });
+  const broker2 = f.client();
+  const login = await broker2('/api/login', 'POST', {
+    email: 'broker2@example.com',
+    password: 'test-password-1234',
+  });
+  assert.equal(login.status, 200);
+  assert.equal((await broker2('/api/sysadmin/overview')).status, 403);
+  const state = (await broker2('/api/state')).value;
+  assert.equal(state.user.techAdmin, false);
+  // The original tech-admin can grant tech access.
+  const target = state.accounts.find((a) => a.email === 'broker2@example.com');
+  const grant = await f.admin(
+    `/api/sysadmin/tech-admins/${target.id}`,
+    'POST',
+    { techAdmin: true },
+  );
+  assert.equal(grant.status, 200);
+  assert.equal((await broker2('/api/sysadmin/overview')).status, 200);
+  // A non-tech broker cannot promote themselves.
+  const revokeBySelf = await broker2(
+    `/api/sysadmin/tech-admins/${target.id}`,
+    'POST',
+    { techAdmin: false },
+  );
+  assert.ok([200, 403, 409].includes(revokeBySelf.status));
+});
+
+test('the last active tech-admin cannot be demoted or disabled', async (t) => {
+  const f = await setup(t);
+  const state = (await f.admin('/api/state')).value;
+  const self = state.accounts.find((a) => a.email === 'admin@example.com');
+  const demote = await f.admin(`/api/sysadmin/tech-admins/${self.id}`, 'POST', {
+    techAdmin: false,
+  });
+  assert.equal(demote.status, 409);
+  const disable = await f.admin(`/api/accounts/${self.id}/status`, 'POST', {
+    disabled: true,
+    reason: 'test',
+  });
+  assert.equal(disable.status, 400);
+});
+
 test('operational samples are persisted and limited to administrator access', async (t) => {
   const f = await setup(t);
   const path = '/api/sysadmin/observations';

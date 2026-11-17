@@ -1,5 +1,5 @@
 /* Cache only the application shell; account API data never enters Cache Storage. */
-const CACHE = 'yyc-driver-shell-v2';
+const CACHE = 'yyc-driver-shell-v3';
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
@@ -11,7 +11,7 @@ self.addEventListener('install', (event) => {
       const assets = [...html.matchAll(/(?:src|href)="(\/react\/assets\/[^"#?]+)"/g)].map(
         (match) => match[1],
       );
-      await cache.addAll(assets);
+      await cache.addAll([...assets, '/react/manifest.webmanifest', '/react/icon.svg']);
     })(),
   );
 });

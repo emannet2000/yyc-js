@@ -27,6 +27,36 @@ async function job(
   await action(f.driver, id, 'deliver', { pod: 'POD', recipient: 'Staff' });
   return id;
 }
+test('fleet tracking is broker-only and excludes completed deliveries and private tracking payloads', async (t) => {
+  const f = await setup(t);
+  const endpoint = '/api/fleet/tracking';
+  assert.equal((await f.client()(endpoint)).status, 401);
+  assert.equal((await f.store(endpoint)).status, 403);
+  assert.equal((await f.driver(endpoint)).status, 403);
+  assert.equal((await f.admin(endpoint, 'POST', {})).status, 405);
+  const id = await job(f);
+  let result = await f.admin(endpoint);
+  assert.equal(result.status, 200);
+  assert.equal(result.value.truncated, false);
+  assert.equal(result.value.deliveries.length, 1);
+  assert.equal(result.value.deliveries[0].latitude, undefined);
+  await f.driver(`/api/shipments/${id}/tracking`, 'POST', {
+    latitude: 51.05,
+    longitude: -114.07,
+    accuracy: 8,
+  });
+  result = await f.admin(endpoint);
+  const row = result.value.deliveries[0];
+  assert.equal(row.shipmentId, id);
+  assert.equal(row.latitude, 51.05);
+  assert.equal(row.driverId, f.driverId);
+  assert.equal(row.data, undefined);
+  assert.equal(row.route, undefined);
+  await action(f.driver, id, 'pickup');
+  await action(f.driver, id, 'deliver', { pod: 'POD', recipient: 'Receiver' });
+  assert.deepEqual((await f.admin(endpoint)).value.deliveries, []);
+});
+
 const plan = {
   date: '2099-11-07',
   window: '13:00–16:00',

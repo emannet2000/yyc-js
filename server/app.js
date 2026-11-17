@@ -130,7 +130,7 @@ export function createApplication({
   publicOrigin = origin.origin;
   const db = new DatabaseSync(databasePath);
   db.exec(`PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
-    CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('store','driver','admin')),name TEXT NOT NULL,profile TEXT NOT NULL,approved INTEGER NOT NULL DEFAULT 0,disabled INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('store','driver','admin')),name TEXT NOT NULL,profile TEXT NOT NULL,approved INTEGER NOT NULL DEFAULT 0,disabled INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,tech_admin INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS trucks(id TEXT PRIMARY KEY,driver_id TEXT NOT NULL UNIQUE REFERENCES users(id),plate TEXT NOT NULL UNIQUE,profile TEXT NOT NULL,approved INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),csrf TEXT NOT NULL,expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS shipments(id TEXT PRIMARY KEY,store_id TEXT NOT NULL REFERENCES users(id),driver_id TEXT REFERENCES users(id),offered_to TEXT REFERENCES users(id),status TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,data TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
@@ -144,6 +144,24 @@ export function createApplication({
     CREATE INDEX IF NOT EXISTS shipments_offer ON shipments(offered_to);
     CREATE INDEX IF NOT EXISTS audit_shipment ON audit(shipment_id,id);
     CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);`);
+  // Pre-existing databases need the tech_admin column added before first query.
+  const userColumns = db.prepare("PRAGMA table_info('users')").all();
+  if (!userColumns.some((c) => c.name === 'tech_admin'))
+    db.exec('ALTER TABLE users ADD COLUMN tech_admin INTEGER NOT NULL DEFAULT 0');
+  function ensureTechAdmin() {
+    // The first active broker on an unprovisioned system becomes tech-admin so
+    // the SysAdmin UI is never locked out after an upgrade or first install.
+    const has = db
+      .prepare(
+        "SELECT 1 FROM users WHERE role='admin' AND disabled=0 AND tech_admin=1 LIMIT 1",
+      )
+      .get();
+    if (!has)
+      db.exec(
+        "UPDATE users SET tech_admin=1 WHERE id=(SELECT id FROM users WHERE role='admin' AND disabled=0 ORDER BY created_at ASC LIMIT 1)",
+      );
+  }
+  ensureTechAdmin();
   const loginLimiter = createLoginLimiter();
   const registrationLimiter = createRegistrationLimiter();
   const resetLimiter = createRegistrationLimiter();
@@ -216,6 +234,7 @@ export function createApplication({
       version: JSON.parse(row.profile).version || 1,
       approved: !!row.approved,
       disabled: !!row.disabled,
+      techAdmin: !!row.tech_admin,
       profile: JSON.parse(row.profile),
       truck: truck
         ? {
@@ -447,6 +466,7 @@ export function createApplication({
   }
   async function register(data, admin = false) {
     const role = admin ? 'admin' : choice(data, 'role', roles);
+    const techAdmin = admin && data.techAdmin === true ? 1 : 0;
     const name = text(data, 'name'),
       email = text(data, 'email').toLowerCase();
     requireThat(
@@ -478,7 +498,7 @@ export function createApplication({
     return transaction(db, () => {
       // Another request may have registered while password hashing was pending.
       checkRegistrationAvailable(email, truck);
-      db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?,?,?)').run(
+      db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?,?,?,?)').run(
         id,
         email,
         hash,
@@ -488,6 +508,7 @@ export function createApplication({
         role === 'driver' ? 0 : 1,
         0,
         new Date().toISOString(),
+        techAdmin,
       );
       if (truck)
         db.prepare('INSERT INTO trucks VALUES (?,?,?,?,0)').run(
@@ -496,6 +517,7 @@ export function createApplication({
           truck.plate,
           JSON.stringify(truck),
         );
+      if (role === 'admin') ensureTechAdmin();
       return { id };
     });
   }
@@ -547,11 +569,16 @@ export function createApplication({
     return data;
   }
   function send(res, status, value) {
-    res.writeHead(status, {
+    const headers = {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
-    });
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'no-referrer',
+      'Permissions-Policy': 'geolocation=(self), camera=(), microphone=()',
+    };
+    if (secureCookies) headers['Strict-Transport-Security'] = 'max-age=31536000';
+    res.writeHead(status, headers);
     res.end(JSON.stringify(value));
   }
   function cookie(value, maxAge) {
@@ -586,6 +613,11 @@ export function createApplication({
         data.version === s.version,
         409,
         'Delivery changed. Refresh and review before trying again.',
+      );
+      requireThat(
+        !['Delivered', 'Returned', 'Cancelled'].includes(s.status),
+        403,
+        'Delivery is closed; no further actions are available.',
       );
       const admin = user.role === 'admin',
         owner = user.role === 'store' && s.storeId === user.id;
@@ -1064,6 +1096,9 @@ export function createApplication({
           delete t.route;
           delete t.eta;
           delete t.etaUpdatedAt;
+          delete t.destinationEta;
+          delete t.completionEta;
+          delete t.etaBreakdown;
           db.prepare('UPDATE tracking SET data=? WHERE shipment_id=?').run(
             JSON.stringify(t),
             id,
@@ -1102,6 +1137,7 @@ export function createApplication({
       '.svg': 'image/svg+xml',
       '.png': 'image/png',
       '.ico': 'image/x-icon',
+      '.webmanifest': 'application/manifest+json',
     };
     requireThat(mime[extname(path)], 404, 'File not found.');
     let content;
@@ -1111,11 +1147,21 @@ export function createApplication({
     } catch {
       throw new HttpError(404, 'File not found. Build the frontend with npm run build.');
     }
-    res.writeHead(200, {
+    const headers = {
       'Content-Type': mime[extname(path)],
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'no-cache',
-    });
+      'Referrer-Policy': 'no-referrer',
+    };
+    if (extname(path) === '.html') {
+      headers['X-Frame-Options'] = 'DENY';
+      headers['Content-Security-Policy'] =
+        "default-src 'self'; img-src 'self' data: https://*.tile.openstreetmap.org; " +
+        "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:; " +
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+    }
+    if (secureCookies) headers['Strict-Transport-Security'] = 'max-age=31536000';
+    res.writeHead(200, headers);
     res.end(req.method === 'HEAD' ? undefined : content);
   }
   const operations = createOperations({
@@ -1176,12 +1222,13 @@ export function createApplication({
         measured = true;
         const rawPath = String(req.url || '').split('?')[0];
         const segments = rawPath.split('/').filter(Boolean);
-        const route = segments[0] === 'api'
-          ? '/api/' + (segments[1] || 'other')
-          : '/static';
+        const route =
+          segments[0] === 'api' ? '/api/' + (segments[1] || 'other') : '/static';
         sysadmin.observeHttp({
-          method: req.method || 'GET', route,
-          status: responseStatus, durationMs: Math.max(0, performance.now() - startedAt),
+          method: req.method || 'GET',
+          route,
+          status: responseStatus,
+          durationMs: Math.max(0, performance.now() - startedAt),
         });
       }
       return originalEnd(...args);
@@ -1373,39 +1420,111 @@ export function createApplication({
         return;
       }
       if (path.startsWith('/api/sysadmin/')) {
-        requireThat(user.role === 'admin', 403, 'Administrator access required.');
+        requireThat(
+          user.role === 'admin' && user.techAdmin,
+          403,
+          'Technical administrator access required.',
+        );
         res.setHeader('Cache-Control', 'no-store');
         if (req.method === 'GET') {
           if (path === '/api/sysadmin/overview') send(res, 200, sysadmin.snapshot());
-          else if (path === '/api/sysadmin/events') send(res, 200, { events: sysadmin.events() });
-          else if (path === '/api/sysadmin/incidents') send(res, 200, { incidents: sysadmin.incidents() });
-          else if (path === '/api/sysadmin/incident-records') send(res, 200, { incidents: sysadmin.trackedIncidents() });
-          else if (path === '/api/sysadmin/http-metrics') send(res, 200, sysadmin.httpMetrics());
+          else if (path === '/api/sysadmin/events')
+            send(res, 200, { events: sysadmin.events() });
+          else if (path === '/api/sysadmin/incidents')
+            send(res, 200, { incidents: sysadmin.incidents() });
+          else if (path === '/api/sysadmin/incident-records')
+            send(res, 200, { incidents: sysadmin.trackedIncidents() });
+          else if (path === '/api/sysadmin/http-metrics')
+            send(res, 200, sysadmin.httpMetrics());
           else if (path === '/api/sysadmin/alerts') send(res, 200, sysadmin.alerts());
-          else if (path === '/api/sysadmin/observations') send(res, 200, { observations: sysadmin.observationHistory() });
-          else if (path === '/api/sysadmin/data-quality') send(res, 200, sysadmin.dataQuality());
-          else if (path === '/api/sysadmin/readiness') send(res, 200, sysadmin.readiness());
-          else if (/^\/api\/sysadmin\/incident-records\/[a-f0-9-]+\/history$/.test(path)) {
+          else if (path === '/api/sysadmin/observations')
+            send(res, 200, { observations: sysadmin.observationHistory() });
+          else if (path === '/api/sysadmin/data-quality')
+            send(res, 200, sysadmin.dataQuality());
+          else if (path === '/api/sysadmin/readiness')
+            send(res, 200, sysadmin.readiness());
+          else if (
+            /^\/api\/sysadmin\/incident-records\/[a-f0-9-]+\/history$/.test(path)
+          ) {
             const id = path.split('/')[4];
             requireThat(sysadmin.getIncident(id), 404, 'Incident not found.');
             send(res, 200, { events: sysadmin.incidentHistory(id) });
-          }
-          else throw new HttpError(404, 'SysAdmin endpoint not found.');
-        } else if (req.method === 'POST' && path === '/api/sysadmin/observations/sample') {
+          } else throw new HttpError(404, 'SysAdmin endpoint not found.');
+        } else if (
+          req.method === 'POST' &&
+          path === '/api/sysadmin/observations/sample'
+        ) {
           send(res, 201, sysadmin.sampleObservations());
         } else if (req.method === 'POST' && path === '/api/sysadmin/incident-records') {
           const data = await readBody(req);
           const title = text(data, 'title');
           const details = text(data, 'details');
-          const severity = choice(data, 'severity', ['low','medium','high','critical']);
+          const severity = choice(data, 'severity', [
+            'low',
+            'medium',
+            'high',
+            'critical',
+          ]);
           requireThat(title.length <= 160, 400, 'Incident title is too long.');
-          send(res, 201, sysadmin.recordIncident({ id: randomUUID(), title, details, severity, actorId: user.id }));
-        } else if (req.method === 'POST' && /^\/api\/sysadmin\/incident-records\/[a-f0-9-]+\/status$/.test(path)) {
+          send(
+            res,
+            201,
+            sysadmin.recordIncident({
+              id: randomUUID(),
+              title,
+              details,
+              severity,
+              actorId: user.id,
+            }),
+          );
+        } else if (
+          req.method === 'POST' &&
+          /^\/api\/sysadmin\/incident-records\/[a-f0-9-]+\/status$/.test(path)
+        ) {
           const data = await readBody(req);
-          const status = choice(data, 'status', ['open','acknowledged','resolved']);
+          const status = choice(data, 'status', ['open', 'acknowledged', 'resolved']);
           const id = path.split('/')[4];
           requireThat(sysadmin.getIncident(id), 404, 'Incident not found.');
           send(res, 200, sysadmin.changeIncident({ id, status, actorId: user.id }));
+        } else if (
+          req.method === 'POST' &&
+          /^\/api\/sysadmin\/tech-admins\/[^/]+$/.test(path)
+        ) {
+          const data = await readBody(req);
+          requireThat(
+            typeof data.techAdmin === 'boolean',
+            400,
+            'techAdmin must be a boolean.',
+          );
+          const targetId = path.split('/')[4];
+          const target = db.prepare('SELECT * FROM users WHERE id=?').get(targetId);
+          requireThat(
+            target && target.role === 'admin',
+            404,
+            'Technical administrator must be a broker account.',
+          );
+          transaction(db, () => {
+            if (!data.techAdmin && target.tech_admin)
+              requireThat(
+                db
+                  .prepare(
+                    "SELECT count(*) AS total FROM users WHERE role='admin' AND disabled=0 AND tech_admin=1",
+                  )
+                  .get().total > 1,
+                409,
+                'At least one technical administrator must remain.',
+              );
+            db.prepare('UPDATE users SET tech_admin=? WHERE id=?').run(
+              data.techAdmin ? 1 : 0,
+              targetId,
+            );
+            accountEvent(
+              user.id,
+              targetId,
+              data.techAdmin ? 'tech-admin:granted' : 'tech-admin:revoked',
+            );
+          });
+          send(res, 200, { ok: true });
         } else throw new HttpError(405, 'Method not allowed.');
         return;
       }
@@ -1516,7 +1635,7 @@ export function createApplication({
             'You cannot disable your own account.',
           );
           transaction(db, () => {
-            if (data.disabled && target.role === 'admin')
+            if (data.disabled && target.role === 'admin') {
               requireThat(
                 db
                   .prepare(
@@ -1526,6 +1645,17 @@ export function createApplication({
                 409,
                 'At least one broker must remain active.',
               );
+              if (target.tech_admin)
+                requireThat(
+                  db
+                    .prepare(
+                      "SELECT count(*) AS total FROM users WHERE role='admin' AND disabled=0 AND tech_admin=1",
+                    )
+                    .get().total > 1,
+                  409,
+                  'At least one technical administrator must remain active.',
+                );
+            }
             db.prepare('UPDATE users SET disabled=? WHERE id=?').run(
               data.disabled ? 1 : 0,
               targetId,
@@ -1686,6 +1816,7 @@ export function createApplication({
   });
   return {
     server,
+    sampleObservations: sysadmin.sampleObservations,
     processNotifications: operations.processNotifications,
     expire: operations.expire,
     close: () => db.close(),

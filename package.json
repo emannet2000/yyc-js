@@ -21,9 +21,12 @@
     "test:workflows": "node --test tests/workflow*.test.mjs tests/*dom.test.mjs",
     "backup:scheduled": "node server/maintenance-cli.js backup",
     "recovery:drill": "node server/maintenance-cli.js drill",
-    "start:configured": "node --env-file=.env server/start.js"
+    "start:configured": "node --env-file=.env server/start.js",
+    "test:pilot": "node --test tests/delivery-monitor.test.mjs tests/pwa-reliability.dom.test.mjs tests/live-map.dom.test.mjs tests/mobility.dom.test.mjs tests/workflow-regressions.test.mjs",
+    "pilot:check": "npm run build && npm run lint && npm run test:pilot"
   },
   "dependencies": {
+    "leaflet": "1.9.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "zustand": "5.1.0"
@@ -31,6 +34,7 @@
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "@playwright/test": "1.65.1",
+    "@types/leaflet": "1.9.22",
     "@types/node": "24.13.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

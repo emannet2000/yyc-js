@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type RefObject, type FormEvent } from 'rea
 import { api } from './api';
 import { useAppStore } from './stores/useAppStore';
 import { Field } from './Field';
+import { LocationMap } from './LiveMap';
 import { dataFrom } from './forms';
 import { ActionForm } from './ActionForm';
 import { prePickup, cargoStates } from '../shared/planning.js';
@@ -801,6 +802,9 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
     <section className="card">
       <h2>Location and ETA</h2>
       {(error || loadError) && <p role="alert">{error || loadError}</p>}
+      {!loadError && (
+        <LocationMap location={value || undefined} shipmentVersion={s.version} />
+      )}
       {value?.recordedAt ? (
         <>
           <p>

@@ -8,6 +8,7 @@ const emptyDraft: Record<string, string> = {};
 export function ActionForm({
   owner,
   shipmentId,
+  draftScope,
   action,
   children,
   busy,
@@ -16,13 +17,14 @@ export function ActionForm({
 }: {
   owner: string;
   shipmentId: string;
+  draftScope?: string;
   action: Action;
   children: ReactNode;
   busy: boolean;
   label: string;
   onSave: (data: Payload) => Promise<void>;
 }) {
-  const key = actionDraftKey(shipmentId, action),
+  const key = actionDraftKey(shipmentId, action, draftScope),
     form = useRef<HTMLFormElement>(null);
   const draft = useUiStore((state) =>
     state.draftOwner === owner ? state.actionDrafts[key] || emptyDraft : emptyDraft,
@@ -39,7 +41,7 @@ export function ActionForm({
         if (field.value !== value) field.value = value;
       }
     }
-  }, [draft]);
+  }, [draft, key]);
   function change(event: FormEvent<HTMLFormElement>) {
     const field = event.target;
     if (
@@ -48,14 +50,14 @@ export function ActionForm({
         field instanceof HTMLTextAreaElement) &&
       field.name
     )
-      setDraft(owner, shipmentId, action, field.name, field.value);
+      setDraft(owner, shipmentId, action, field.name, field.value, draftScope);
   }
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!busy) void onSave(dataFrom(event.currentTarget));
   }
   return (
-    <form ref={form} onChange={change} onSubmit={submit}>
+    <form key={key} ref={form} onChange={change} onSubmit={submit}>
       {children}
       <button className="btn" disabled={busy}>
         {busy ? 'Saving…' : label}

@@ -40,3 +40,8 @@ export function validDeadline(
       reservation({ date, window, estimatedMinutes, travelBufferMinutes })[1]
   );
 }
+
+/** @param {{deliveryAttempt?: number,failedAttempts?: unknown[]}} shipment */
+export function deliveryAttempt(shipment) {
+  return shipment.deliveryAttempt || (shipment.failedAttempts?.length || 0) + 1;
+}

@@ -68,9 +68,10 @@ test('backend registration, sessions, CSRF, account isolation and static paths',
     (await store('/api/shipments', 'POST', { ...booking(), date: '2099-02-30' })).status,
     400,
   );
-  const staticResponse = await request(url + '/demo/');
-  assert.equal(staticResponse.status, 200);
-  assert.match(await staticResponse.text(), /YYC Brokers/);
+  for (const path of ['/demo', '/demo/', '/demo/app.js', '/style.css']) {
+    assert.equal((await request(url + path)).status, 404);
+  }
+  assert.equal((await request(url + '/')).headers.get('location'), '/react/');
   assert.equal((await request(url + '/assets/yyc-brokers-logo.jpg')).status, 200);
   assert.equal((await request(url + '/%2e%2e%2fpackage.json')).status, 404);
   const auth = await login(store, 'store@example.com');

@@ -87,3 +87,19 @@ test('backup and restore reject overwrite, corruption, and source/destination id
   await app.stop();
   t.after(() => rmSync(directory, { recursive: true, force: true }));
 });
+
+test('restore invalidates unused first-broker setup tokens', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'yyc-setup-restore-'));
+  const source = join(directory, 'source.sqlite'),
+    snapshot = join(directory, 'snapshot.sqlite'),
+    restored = join(directory, 'restored.sqlite');
+  const fixture = await start(t, { databasePath: source });
+  fixture.app.createSetupToken();
+  backupDatabase(source, snapshot);
+  restoreDatabase(snapshot, restored);
+  const db = new DatabaseSync(restored, { readOnly: true });
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bootstrap_tokens').get().n, 0);
+  db.close();
+  await fixture.stop();
+  rmSync(directory, { recursive: true, force: true });
+});

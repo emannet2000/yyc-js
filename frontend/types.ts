@@ -48,6 +48,26 @@ export interface Stop {
   recipient?: string;
 }
 export interface Shipment {
+  deliveryAttempt?: number;
+  pickupDriverId?: string;
+  handoverHistory?: { status: string; fromDriverId: string; toDriverId: string }[];
+  customerRequests?: {
+    id: string;
+    kind: string;
+    details: string;
+    status: string;
+    response?: string;
+    proposal?: { destination: string; kg: number; pallets: number };
+  }[];
+  rateChange?: { driverId: string; rate: number; reason: string };
+  deliveryEvidence?: {
+    fileId: string;
+    sha256: string;
+    arrivedAt: string;
+    confirmedAt: string;
+    policy: string;
+  };
+  evidenceCount?: number;
   stops?: Stop[];
   id: string;
   status: Status;

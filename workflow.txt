@@ -1,0 +1,206 @@
+YYC BROKERS — DELIVERY WORKFLOW
+
+The app manages a delivery through several separate agreements: the owner agrees to the service and customer price, the broker arranges the work, and the driver accepts responsibility for moving the cargo. Each step records who acted and what happens next.
+
+Here is how the complete workflow works, including the exceptions.
+
+1. Setting up the workspace and first broker
+
+A new workspace needs a broker before anyone can approve drivers, issue quotations, or dispatch deliveries. Public registration cannot create a broker account.
+
+The operator runs npm run setup on the server. This generates a private, one-time setup token that expires after 30 minutes. The first broker opens the login page, selects Set up broker account, and supplies that token along with their name, phone number, email, and password.
+
+Once the first broker account is created, this setup route closes. The token cannot be reused, and there are no default accounts or shared passwords. Additional broker accounts and account recovery remain operator-controlled.
+
+For a deployed app, the setup command must use the same database configuration as the running service. Otherwise, an account could be created in a different database and fail to work at login—the problem encountered earlier.
+
+2. Registering owners and drivers
+
+A store owner registers the business and its receiving details. The saved address and receiving contact can help populate future delivery requests, reducing repeated entry.
+
+A driver registers personal contact information and truck details, including vehicle type, weight capacity, pallet capacity, service area, and liftgate availability.
+
+The broker reviews the driver and truck before approving them for work. The approval button records the broker’s decision; the business still needs to carry out its actual driver and vehicle checks.
+
+Approval matters because dispatch depends on both the person and the vehicle. An approved driver with an unsuitable or unapproved truck should not receive a job that requires different equipment.
+
+3. The owner creates a delivery request
+
+The owner describes the work that needs to happen:
+
+- Pickup and delivery addresses.
+- Pickup date and time window.
+- Cargo description, weight, and pallet count.
+- Required vehicle type and unloading equipment.
+- Pickup and receiving contacts.
+- Receiving hours, appointment references, and instructions.
+- An optional delivery deadline.
+
+For example, an owner might request collection of four pallets weighing 900 kg from a warehouse, using a box truck with a liftgate, with delivery to a store receiving dock.
+
+Submitting the form creates a persisted delivery in Awaiting quote. It does not mean that a price has been agreed, a driver has been assigned, or collection is confirmed.
+
+At this stage, the broker needs to review whether the request is understandable and practical. Ambiguous addresses, incomplete receiving instructions, or incorrect cargo figures should be clarified before quoting.
+
+4. The broker reviews and prices the work
+
+The broker considers the route, cargo, schedule, equipment, and handling requirements, then enters two amounts:
+
+- The customer price, which the owner will be asked to accept.
+- The driver rate, which the proposed driver will be offered.
+
+Those amounts serve different purposes. Owners do not see internal driver rates, and drivers do not see the customer’s price.
+
+Issuing the quotation moves the delivery to Quote ready. The owner can now review the commercial offer against the shipment details.
+
+Quotations currently have a 48-hour validity period. If a quotation expires, the delivery returns for a new quotation rather than allowing an outdated offer to remain indefinitely actionable.
+
+5. The owner reviews and accepts the quotation
+
+The owner should check the price together with the shipment details. Acceptance applies to the current version of the quotation and delivery instructions.
+
+Accepting moves the delivery to Ready to assign. It authorizes the broker to arrange dispatch, but it does not mean a driver has already committed.
+
+Acceptance also does not charge the owner or transfer money. Payment processing is separate from quotation acceptance.
+
+If the owner disagrees with the price or needs different shipment details, they can submit an owner request instead of accepting an unsuitable quotation. Depending on the early delivery stage, they can also cancel the request directly.
+
+6. The broker checks dispatch readiness
+
+Before offering the work, the broker selects a driver who meets the shipment’s requirements. The app checks approval, truck type, weight capacity, pallet capacity, liftgate requirements, and scheduling commitments.
+
+For example, a truck with a 500 kg capacity cannot be selected for a 900 kg shipment. A delivery requiring a liftgate should not be offered to a truck without one.
+
+Scheduling checks account for pickup windows and any entered planning duration and travel buffer. These are reservation checks. The broker still needs to judge actual route feasibility, loading time, receiving restrictions, and the driver’s operating circumstances.
+
+The app also distinguishes future assignments from live cargo. A driver may reserve future work, but cannot collect another live load while already responsible for cargo that must first be delivered or handed over.
+
+7. The driver receives and responds to the offer
+
+Sending the job offer changes the delivery to Offered. The driver reviews the route, cargo, schedule, handling requirements, and offered rate.
+
+The driver can accept or decline. Accepting makes the delivery Assigned, establishing the driver’s responsibility for that job. Declining releases the offer so the broker can arrange another driver.
+
+Offers currently expire after one hour if they are not accepted. This prevents a pending offer from reserving a driver’s schedule indefinitely.
+
+A broker sending an offer is therefore different from a confirmed assignment. The driver’s explicit acceptance completes that handoff.
+
+8. The driver arrives and collects the cargo
+
+An assigned driver can record arrival at the pickup location, then confirm that the cargo has been collected.
+
+Recording arrival documents a milestone. Confirming pickup changes the delivery to In transit and records that the driver now has responsibility for the load.
+
+Pickup can be blocked when an exception remains unresolved or when the driver is already carrying another live load. These restrictions prevent a screen action from bypassing an outstanding operational problem.
+
+If the cargo is missing, damaged, incorrectly described, or unavailable, the driver should report an exception rather than confirming a pickup that did not occur.
+
+9. The driver follows the route and completes stops
+
+During transit, the driver works through any intermediate stops in the recorded order. Each stop can include its own receipt and receiving contact information.
+
+The app can support shared location and road-route estimates when the necessary services are configured. Location sharing must be started with device permission; it should not be assumed to be active simply because a delivery is assigned.
+
+ETA information is an estimate. Receiving teams should still consider loading, unloading, access restrictions, and other delays. Stale location data should not be treated as a reliable current position.
+
+Browser location sharing can also be interrupted when the phone locks or the browser closes. The Android companion provides a separate background-sharing option, subject to the phone’s permissions and operating behavior.
+
+10. The driver confirms final delivery
+
+Final delivery has stronger requirements than changing a status label. The server requires all intermediate stops to be completed, no unresolved exception, arrival at the final destination, an evidence file attached after pickup, a receipt reference, and a recipient name.
+
+The evidence file can be a delivery photo, signature image, or receipt document. Supported formats are PNG, JPEG, and PDF, with a 2 MiB limit per file.
+
+Successful confirmation changes the delivery to Delivered. The completion retains the evidence reference and hash, driver identity, arrival time, and confirmation time.
+
+These records make the delivery more accountable and reviewable. They document what the driver submitted; they do not independently establish that the named recipient’s identity was verified or that the uploaded document is authentic.
+
+11. The broker invoices and records payment activity
+
+After a delivery or return is completed, the broker can issue an invoice and record verified external financial transactions.
+
+Customer billing and driver payout are separate records. A completed delivery does not automatically mean the customer has paid, and a customer payment does not automatically mean the driver has been paid.
+
+The app acts as a ledger: it records transactions such as payments, refunds, adjustments, and payouts. It does not move money between bank accounts or charge cards.
+
+The broker should record a transaction after verifying that it occurred through the business’s actual payment process. References and explanations help reconcile the ledger with external records.
+
+12. Owners request changes through the app
+
+Owners can submit three kinds of request: quotation review, destination or cargo changes, and cancellation.
+
+A request explains what the owner wants and why. A shipment-change request also contains the proposed destination, weight, and pallet count. Only one request can await review at a time, helping prevent contradictory instructions.
+
+Submitting a request does not immediately change the driver’s instructions. The current delivery remains in effect until the broker reviews the request.
+
+The broker must approve and apply the change, or decline it with an explanation. Approved customer-price changes require fresh customer acceptance. Approved shipment changes return the work for a new quotation.
+
+After collection, cancellation becomes a cargo-return decision. The app retains responsibility for the physical load instead of simply removing the delivery from active work.
+
+13. Customer quotations and driver rates change differently
+
+A change to the customer price can affect the owner’s agreement. Before pickup, correcting that price returns the delivery for fresh customer acceptance and clears existing dispatch commitments.
+
+A driver-rate-only change follows a separate path. It preserves the customer’s accepted price, quotation version, and dispatch state.
+
+If no driver has been selected, the broker can update the rate immediately. If a driver has already been offered or assigned the job, the new rate becomes a proposal that the driver must accept.
+
+Declining retains the existing agreed rate. Until acceptance, the previous rate remains in force. This avoids silently changing a driver’s compensation or forcing the owner to approve an internal payout adjustment.
+
+14. Exceptions and failed deliveries need explicit resolution
+
+A driver can report an exception when something prevents normal progress—for example, damaged cargo, a closed receiving location, an unavailable contact, or unsafe unloading conditions.
+
+An unresolved exception blocks relevant cargo-progress actions. The broker reviews it and records a resolution so the driver has a documented basis for continuing.
+
+A failed delivery attempt is a more specific outcome: the driver attempted delivery but could not complete it. The broker then decides whether to arrange redelivery or return the cargo.
+
+These paths should remain distinct. Reporting a problem does not mean delivery succeeded, and recording a failed attempt does not mean the cargo has been returned.
+
+15. Returns and driver handovers preserve cargo responsibility
+
+When cargo must be returned, the delivery enters Returning, with instructions to return it to pickup. The driver must record a return receipt reference and the person receiving the cargo before it becomes Returned.
+
+Driver handover is another controlled transfer. The broker proposes a suitable replacement driver, and the current driver remains assigned until the replacement explicitly accepts.
+
+Acceptance transfers responsibility in the app while preserving the shipment’s existing progress. The actual physical exchange of cargo still needs to be arranged by the people involved.
+
+A handover recorded in software should correspond to a real, understood transfer of responsibility—not merely a convenient way to remove a job from someone’s screen.
+
+16. Updates, offline work, and conflicting changes
+
+Visible workspaces refresh every ten seconds and when the browser regains focus, becomes visible, or reconnects. This helps owners see quotations and drivers see dispatch changes without repeatedly pressing Refresh.
+
+Assignment-changing actions notify both current and former affected drivers. If an assignment is removed, the driver also receives a persistent warning to stop following the previous instructions.
+
+Drivers can record supported actions offline. Those actions remain on the device and are provisional until the server accepts them. For offline completion, the required arrival, evidence attachment, and delivery confirmation must replay in the correct order after pickup.
+
+If the broker changes the delivery before those actions synchronize, replay stops for review. The app should not overwrite newer instructions with an older offline version.
+
+Background updates also preserve a useful distinction: “saved on this device” is different from “confirmed by the server.” Staff should check synchronization status before treating offline work as fully recorded.
+
+The workflow works best when each participant treats the app’s statuses as specific commitments: a request describes work, quotation acceptance agrees terms, assignment confirms the driver, pickup establishes cargo responsibility, and delivery or return closes that responsibility with evidence.
+
+WORKFLOW RECOVERY POLICIES
+
+Completed driver actions and evidence uploads can be safely retried by their original account after assignment access ends. Retries acknowledge the original result without restoring delivery access. Expired or withdrawn offers clear rate proposals that the former driver can no longer answer.
+
+Delivery proof is linked to the current pickup version, independently of timestamps. Files uploaded before pickup do not qualify. Ten evidence files are allowed plus a reserved post-pickup completion-proof slot if needed. Legacy files remain available but require fresh proof for active deliveries.
+
+Owners can withdraw pending requests with an explanation. An urgent cancellation can supersede an earlier pending quotation or shipment request; its history remains visible.
+
+For handovers, the broker explicitly allocates the agreed total driver rate across every cargo driver and records a reason for each share. A sole cargo driver receives the whole rate by default. Each driver sees only their own allocation and payout records. Payouts and reversals are checked against that driver's balance. Allocation reductions below amounts paid require a verified reversal first; allocation revisions are retained. Existing handover invoices must be reviewed before additional payouts. No money is transferred by the app.
+
+REQUESTS, RETURNS, AND DELIVERY ATTEMPTS
+
+Broker decisions and withdrawal drafts belong to a specific owner request. A replacement request requires a new decision and explanation; edits survive refreshes of the same request.
+
+Return navigation omits unfinished customer stops and routes from the current location to the pickup/return address. Completed stops remain part of the history.
+
+Replacement drivers can accept rescue handovers during an open exception. The exception still holds cargo progress until the broker records a resolution.
+
+Failed deliveries do not publish an ETA. Their old route and ETA are cleared, automatic ETA calculation pauses, and manual ETA publication waits for redelivery or return instructions. Location sharing can continue.
+
+Each redelivery is a new attempt. Arrival must be recorded again and a new evidence file must be uploaded for that attempt. Earlier attempt evidence remains in history. A reserved proof slot is available for each attempt when the general file allowance is full. Legacy files with ambiguous attempt information require replacement proof for active deliveries.
+
+Verified payout reversals are allowed while a legacy handover allocation awaits review. This lets the broker reverse an excess payment before recording the correct split. New positive payouts remain blocked until review is complete.

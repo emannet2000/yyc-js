@@ -508,3 +508,45 @@ test('a pending write from the previous session cannot confirm or refresh the ne
   assert.equal(store.getState().state.user.id, 'new-owner');
   assert.equal(store.getState().message, '');
 });
+
+test('background sync preserves identical workspace references, refreshes notifications and flags removed assignments', async () => {
+  const initial = {
+    ...workspace,
+    csrf: 'sync-token',
+    user: { id: 'driver-sync', role: 'driver' },
+    shipments: [
+      { id: 'SYNC-1', driverId: 'driver-sync', status: 'Assigned', version: 1 },
+    ],
+  };
+  setCsrf('sync-token');
+  store.setState({
+    state: initial,
+    assignmentAlert: '',
+    syncError: '',
+    refreshVersion: 0,
+  });
+  globalThis.fetch = async () => json(initial);
+  await store.getState().sync();
+  assert.equal(store.getState().state, initial);
+  assert.equal(store.getState().refreshVersion, 1);
+  globalThis.fetch = async () => json({ ...initial, shipments: [] });
+  await store.getState().sync();
+  assert.equal(store.getState().state.shipments.length, 0);
+  assert.match(store.getState().assignmentAlert, /SYNC-1/);
+});
+
+test('background sync skips mutations and leaves a warning on failure; session expiry clears the workspace', async () => {
+  store.setState({ state: workspace, busy: true, syncError: '' });
+  globalThis.fetch = async () => {
+    throw new Error('Should not fetch during a write');
+  };
+  await store.getState().sync();
+  store.setState({ busy: false });
+  globalThis.fetch = async () => json({ error: 'Unavailable' }, 503);
+  await store.getState().sync();
+  assert.match(store.getState().syncError, /out of date/);
+  assert.equal(store.getState().state, workspace);
+  globalThis.fetch = async () => json({ error: 'Expired' }, 401);
+  await store.getState().sync();
+  assert.equal(store.getState().state, null);
+});

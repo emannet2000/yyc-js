@@ -17,6 +17,10 @@ import { ActionForm } from './ActionForm';
 import { eligibleActionDrafts } from './actionDrafts';
 import { dataFrom } from './forms';
 import { DeliveryEvidence } from './DeliveryEvidence';
+import { Setup } from './Setup';
+import { CustomerRequests } from './CustomerRequests';
+import { RateChange } from './RateChange';
+import { useWorkspaceSync } from './useWorkspaceSync';
 import { Accounts } from './Accounts';
 import { RecoveryRequest, ResetPassword } from './Recovery';
 import { createBooking } from './booking';
@@ -34,7 +38,7 @@ import { driverAvailable, canTakeCargo } from '../shared/scheduling.js';
 import { useAppStore } from './stores/useAppStore';
 import { useUiStore } from './stores/useUiStore';
 import type { Action, Payload, Shipment, User } from './types';
-import '../public/style.css';
+import './base.css';
 import './react.css';
 
 const money = (value?: number | null) =>
@@ -141,6 +145,19 @@ function Auth({
   onLogin: () => Promise<void>;
   notify: (message: string) => void;
 }) {
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [setup, setSetup] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void api<{ required: boolean }>('/api/setup')
+      .then((result) => {
+        if (active) setSetupRequired(result.required);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
   const [forgot, setForgot] = useState(false);
   const [register, setRegister] = useState(false),
     [role, setRole] = useState('store'),
@@ -171,6 +188,19 @@ function Auth({
       setBusy(false);
     }
   }
+  if (setup)
+    return (
+      <Setup
+        back={(created) => {
+          if (created)
+            notify('Broker account created. Log in with your email and password.');
+          setSetup(false);
+          void api<{ required: boolean }>('/api/setup').then((result) =>
+            setSetupRequired(result.required),
+          );
+        }}
+      />
+    );
   if (forgot) return <RecoveryRequest back={() => setForgot(false)} />;
   return (
     <div className="auth">
@@ -196,9 +226,20 @@ function Auth({
       <section className="authright">
         <header>
           <span>YYC WORKSPACE</span>
-          <a href="/demo/">Open screen demo →</a>
         </header>
         <div className="authbox">
+          {setupRequired && (
+            <section className="notice">
+              <h2>Workspace setup required</h2>
+              <p>
+                A broker account must be created before drivers can be approved and
+                deliveries dispatched.
+              </p>
+              <button className="btn light" onClick={() => setSetup(true)}>
+                Set up broker account
+              </button>
+            </section>
+          )}
           <h1>{register ? 'Create your YYC account.' : 'Log in to your workspace.'}</h1>
           <p className="muted">
             Store owners, drivers and brokers use their own email and password.
@@ -600,12 +641,18 @@ function Actions({
                 {button(
                   'acceptJob',
                   s.handover ? 'Accept handover' : 'Accept job',
-                  (!!s.handover &&
+                  !!s.handover &&
                     cargoStates.includes(s.status) &&
-                    !canTakeCargo(s.id, shipments, user.id)) ||
-                    !!(s.issue && !s.issue.resolved),
+                    !canTakeCargo(s.id, shipments, user.id),
                 )}
                 {button('decline', s.handover ? 'Decline handover' : 'Decline offer')}
+                {s.issue && !s.issue.resolved && (
+                  <p className="notice">
+                    Accepting responsibility does not resolve the open exception. Pickup,
+                    stop completion, delivery, and return completion remain on hold until
+                    the broker records a resolution.
+                  </p>
+                )}
               </>
             )}
           {active && s.driverId === user.id && (
@@ -637,6 +684,8 @@ function Actions({
                     onChange={(next) => setDraft(user.id, s.id, next)}
                     onSave={(data) => act('deliver', { ...data })}
                     busy={busy}
+                    arrived={!!s.arrivedAt}
+                    evidenceCount={s.evidenceCount || 0}
                   />
                 )}
 
@@ -785,6 +834,8 @@ function Delivery({
             act={act}
           />
         </section>
+        <CustomerRequests s={s} user={user} busy={busy} act={act} />
+        <RateChange s={s} user={user} busy={busy} act={act} />
         <WorkflowActions s={s} user={user} busy={busy} act={act} />
         <Journey s={s} user={user} />
         <LocationTracker s={s} user={user} />
@@ -846,6 +897,10 @@ function App() {
   const recoveryMode =
     recoveryToken !== '' ||
     new URLSearchParams(window.location.search).get('reset') === '1';
+  useWorkspaceSync();
+  const assignmentAlert = useAppStore((s) => s.assignmentAlert);
+  const syncError = useAppStore((s) => s.syncError);
+  const refreshVersion = useAppStore((s) => s.refreshVersion);
   const state = useAppStore((s) => s.state);
   const loading = useAppStore((s) => s.loading);
   const bootError = useAppStore((s) => s.bootError);
@@ -1137,6 +1192,22 @@ function App() {
               </button>
             </div>
           </header>
+          {assignmentAlert && (
+            <section className="notice" role="alert">
+              <p>{assignmentAlert}</p>
+              <button
+                className="btn light"
+                onClick={() => useAppStore.setState({ assignmentAlert: '' })}
+              >
+                Acknowledge assignment change
+              </button>
+            </section>
+          )}
+          {syncError && (
+            <p className="notice" role="status">
+              {syncError}
+            </p>
+          )}
           <div className="driver-status-area">
             <DriverTracking user={user} shipments={shipments} />
             <OfflinePanel user={user} />
@@ -1170,7 +1241,7 @@ function App() {
                 accounts={accounts}
                 busy={busy}
                 save={save}
-                revision={state}
+                revision={refreshVersion}
               />
             ) : page === 'booking' ? (
               <Booking

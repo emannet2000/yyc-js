@@ -1,3 +1,11 @@
+import { cargoDrivers } from '../shared/settlements.js';
+import {
+  AllocationFields,
+  AllocationEditor,
+  shareData,
+  type DriverShare,
+  type CargoDriver,
+} from './PayoutAllocations';
 import { useUiStore } from './stores/useUiStore';
 import { useTracking } from './tracking';
 import { useEffect, useRef, useState, type RefObject, type FormEvent } from 'react';
@@ -337,7 +345,10 @@ export function EvidenceFiles({
               required
             />
           </label>
-          <p>PNG, JPEG, or PDF; up to 2 MiB each and ten files per delivery.</p>
+          <p>
+            PNG, JPEG, or PDF; up to 2 MiB each. Ten files are allowed, plus a reserved
+            completion-proof slot for each delivery attempt if needed.
+          </p>
           <button className="btn light" disabled={busy}>
             Attach evidence file
           </button>
@@ -504,12 +515,17 @@ interface Invoice {
   dueCents: number;
   rateCents: number;
   payoutCents: number;
+  allocations?: DriverShare[];
+  participants?: CargoDriver[];
+  allocationRequired?: boolean;
+  allocationReason?: string;
   entries: {
     id: string;
     kind: string;
     amountCents: number;
     reference: string;
     reason: string;
+    driverId?: string | null;
   }[];
 }
 function InvoiceCard({
@@ -546,7 +562,7 @@ function InvoiceCard({
       <h2>{i.shipmentId}</h2>
       <p>{i.id}</p>
       <p>
-        {user.role === 'driver' ? 'Agreed rate' : 'Invoice total'}:{' '}
+        {user.role === 'driver' ? 'Allocated driver share' : 'Invoice total'}:{' '}
         {cad(user.role === 'driver' ? i.rateCents : i.totalCents)} · Outstanding:{' '}
         {cad(i.dueCents)}
       </p>
@@ -555,9 +571,17 @@ function InvoiceCard({
           Driver rate {cad(i.rateCents)} · Paid out {cad(i.payoutCents)}
         </p>
       )}
+      {user.role === 'driver' && i.allocationReason && (
+        <p>Allocation explanation: {i.allocationReason}</p>
+      )}
+      {user.role === 'admin' && <AllocationEditor invoice={i} busy={busy} save={save} />}
       {i.entries.map((e) => (
         <p key={e.id}>
-          {e.kind}: {cad(e.amountCents)} · {e.reference} · {e.reason}
+          {e.kind}: {cad(e.amountCents)}
+          {user.role === 'admin' && e.driverId
+            ? ` · ${i.allocations?.find((a) => a.driverId === e.driverId)?.name || e.driverId}`
+            : ''}{' '}
+          · {e.reference} · {e.reason}
         </p>
       ))}
       {user.role === 'admin' && (
@@ -567,6 +591,17 @@ function InvoiceCard({
             <select name="kind">
               {['payment', 'refund', 'adjustment', 'payout', 'payoutRefund'].map((v) => (
                 <option key={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Payout recipient (used for payout and payoutRefund entries)
+            <select name="driverId" defaultValue="">
+              <option value="">Choose an allocated driver</option>
+              {i.allocations?.map((a) => (
+                <option key={a.driverId} value={a.driverId}>
+                  {a.name}
+                </option>
               ))}
             </select>
           </label>
@@ -594,13 +629,23 @@ function Billing({
   busy,
   save,
   revision,
+  accounts,
 }: {
   user: User;
   shipments: Shipment[];
+  accounts: User[];
   busy: boolean;
   save: Save;
   revision: unknown;
 }) {
+  const [selectedId, setSelectedId] = useState('');
+  const selected = shipments.find((s) => s.id === selectedId);
+  const participants = selected
+    ? cargoDrivers(selected).map((driverId) => ({
+        driverId,
+        name: accounts.find((a) => a.id === driverId)?.name || driverId,
+      }))
+    : [];
   const { value, error } = useResource<Invoice[]>(
     user.role === 'driver' ? '/api/settlements' : '/api/invoices',
     revision,
@@ -621,20 +666,27 @@ function Billing({
               const data = dataFrom(event.currentTarget),
                 s = shipments.find((s) => s.id === data.shipmentId);
               if (s)
-                void save(
-                  () =>
-                    api('/api/invoices', 'POST', {
-                      shipmentId: s.id,
-                      version: s.version,
-                      taxCents: Number(data.taxCents),
-                    }),
-                  'Invoice issued.',
-                );
+                void save(async () => {
+                  await api('/api/invoices', 'POST', {
+                    shipmentId: s.id,
+                    version: s.version,
+                    taxCents: Number(data.taxCents),
+                    ...(participants.length > 1
+                      ? { allocations: shareData(participants, data) }
+                      : {}),
+                  });
+                  setSelectedId('');
+                }, 'Invoice issued.');
             }}
           >
             <label>
               Completed delivery
-              <select name="shipmentId" required>
+              <select
+                name="shipmentId"
+                required
+                value={selectedId}
+                onChange={(event) => setSelectedId(event.target.value)}
+              >
                 <option value="">Choose a delivery or return</option>
                 {shipments
                   .filter(
@@ -649,6 +701,14 @@ function Billing({
                   ))}
               </select>
             </label>
+            {participants.length > 1 && (
+              <div key={selectedId}>
+                <p>
+                  Agreed total driver rate: {cad(Math.round((selected?.rate || 0) * 100))}
+                </p>
+                <AllocationFields participants={participants} />
+              </div>
+            )}
             <label>
               Verified tax amount (cents)
               <input
@@ -760,6 +820,7 @@ export function OperationsPage({
   if (page === 'billing')
     return (
       <Billing
+        accounts={accounts}
         user={user}
         shipments={shipments}
         busy={busy}
@@ -789,7 +850,7 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
   }
   const { value, error: loadError } = useResource<Tracking>(
     `/api/shipments/${s.id}/tracking`,
-    revision,
+    `${revision}:${s.version}`,
   );
   const active = ['Assigned', ...cargoStates].includes(s.status),
     assigned = user.role === 'driver' && s.driverId === user.id;
@@ -818,7 +879,7 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
       ) : (
         <p>No location has been shared.</p>
       )}
-      {value?.eta && (
+      {value?.eta && s.status !== 'Delivery failed' && (
         <p>
           Estimated arrival: {new Date(value.eta).toLocaleString()} · Updated{' '}
           {value.etaUpdatedAt && new Date(value.etaUpdatedAt).toLocaleString()}
@@ -848,31 +909,39 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
           </button>
         </>
       )}
-      {active && (user.role === 'admin' || assigned) && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            const eta = String(new FormData(event.currentTarget).get('eta') || '');
-            void api(`/api/shipments/${s.id}/tracking`, 'PATCH', {
-              eta: eta ? new Date(eta).toISOString() : '',
-            })
-              .then(() => {
-                setRevision((v) => v + 1);
-                setError('');
-              })
-              .catch((e) => setError(e.message));
-          }}
-        >
-          <Field
-            id="tracking-eta"
-            name="eta"
-            label="Estimated arrival (your local time)"
-            type="datetime-local"
-            required={false}
-          />
-          <button className="btn light">Update ETA</button>
-        </form>
+      {s.status === 'Delivery failed' && (
+        <p className="notice">
+          Delivery attempt failed. ETA is unavailable until the broker arranges redelivery
+          or return. Location sharing remains available.
+        </p>
       )}
+      {active &&
+        s.status !== 'Delivery failed' &&
+        (user.role === 'admin' || assigned) && (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const eta = String(new FormData(event.currentTarget).get('eta') || '');
+              void api(`/api/shipments/${s.id}/tracking`, 'PATCH', {
+                eta: eta ? new Date(eta).toISOString() : '',
+              })
+                .then(() => {
+                  setRevision((v) => v + 1);
+                  setError('');
+                })
+                .catch((e) => setError(e.message));
+            }}
+          >
+            <Field
+              id="tracking-eta"
+              name="eta"
+              label="Estimated arrival (your local time)"
+              type="datetime-local"
+              required={false}
+            />
+            <button className="btn light">Update ETA</button>
+          </form>
+        )}
     </section>
   );
 }

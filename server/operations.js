@@ -1,4 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
+import { deliveryAttempt } from '../shared/planning.js';
+import { createSettlements } from './settlements.js';
 import { isPositiveMoney } from '../shared/money.js';
 
 export function createOperations({
@@ -25,6 +27,25 @@ export function createOperations({
   CREATE INDEX IF NOT EXISTS evidence_shipment ON evidence(shipment_id);
   CREATE TABLE IF NOT EXISTS invoices(id TEXT PRIMARY KEY,shipment_id TEXT NOT NULL UNIQUE REFERENCES shipments(id),amount_cents INTEGER NOT NULL,tax_cents INTEGER NOT NULL,rate_cents INTEGER NOT NULL,driver_id TEXT REFERENCES users(id),version INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS invoice_entries(id TEXT PRIMARY KEY,invoice_id TEXT NOT NULL REFERENCES invoices(id),request_key TEXT NOT NULL,kind TEXT NOT NULL,amount_cents INTEGER NOT NULL,reference TEXT NOT NULL,reason TEXT NOT NULL,actor_id TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,UNIQUE(invoice_id,request_key));`);
+  if (
+    !db
+      .prepare('PRAGMA table_info(evidence)')
+      .all()
+      .some((column) => column.name === 'pickup_version')
+  )
+    db.exec('ALTER TABLE evidence ADD COLUMN pickup_version INTEGER;');
+  if (
+    !db
+      .prepare('PRAGMA table_info(evidence)')
+      .all()
+      .some((column) => column.name === 'delivery_attempt')
+  ) {
+    db.exec('ALTER TABLE evidence ADD COLUMN delivery_attempt INTEGER;');
+    // Preserve unambiguous first-attempt proof. Older retry evidence must be replaced, never guessed.
+    db.exec(
+      "UPDATE evidence SET delivery_attempt=1 WHERE pickup_version IS NOT NULL AND EXISTS(SELECT 1 FROM shipments s WHERE s.id=evidence.shipment_id AND json_array_length(COALESCE(json_extract(s.data,'$.failedAttempts'),'[]'))=0);",
+    );
+  }
   const timestamp = () => new Date(now()).toISOString();
   function notify(userId, shipmentId, message) {
     db.prepare(
@@ -38,8 +59,9 @@ export function createOperations({
       sendNotification ? 'pending' : 'in-app',
     );
   }
-  function notifyShipment(s, message) {
+  function notifyShipment(s, message, previousRecipients = []) {
     const recipients = new Set([
+      ...previousRecipients,
       s.storeId,
       s.driverId,
       s.offeredTo,
@@ -53,14 +75,21 @@ export function createOperations({
   function expire() {
     const rows = db
       .prepare(
-        "SELECT id FROM shipments WHERE status IN ('Quote ready','Offered','Assigned','In transit','Delivery failed','Returning') AND (json_extract(data,'$.quoteExpiresAt') IS NOT NULL OR json_extract(data,'$.offerExpiresAt') IS NOT NULL)",
+        "SELECT id FROM shipments WHERE (status IN ('Quote ready','Offered','Assigned','In transit','Delivery failed','Returning') AND (json_extract(data,'$.quoteExpiresAt') IS NOT NULL OR json_extract(data,'$.offerExpiresAt') IS NOT NULL)) OR (json_type(data,'$.rateChange')='object' AND json_extract(data,'$.rateChange.driverId') IS NOT driver_id AND json_extract(data,'$.rateChange.driverId') IS NOT offered_to)",
       )
       .all();
     if (!rows.length) return;
     transaction(db, () => {
       for (const row of rows) {
         const s = shipments({ role: 'admin' }, row.id, false)[0];
-        let message;
+        const previousRecipients = [s.driverId, s.offeredTo, s.rateChange?.driverId];
+        const messages = [];
+        if (s.rateChange && ![s.driverId, s.offeredTo].includes(s.rateChange.driverId)) {
+          delete s.rateChange;
+          messages.push(
+            'System: stale driver rate proposal cleared; existing agreed rate retained',
+          );
+        }
         if (s.status === 'Quote ready' && s.quoteExpiresAt <= now()) {
           s.quoteArchive = [
             ...(s.quoteArchive || []),
@@ -79,18 +108,21 @@ export function createOperations({
           s.rate = null;
           s.status = 'Awaiting quote';
           delete s.quoteExpiresAt;
-          message = 'System: quotation expired; a new quotation is required';
-        } else if (s.offeredTo && s.offerExpiresAt <= now()) {
+          messages.push('System: quotation expired; a new quotation is required');
+        }
+        if (s.offeredTo && s.offerExpiresAt <= now()) {
           s.offeredTo = null;
           delete s.offerExpiresAt;
           delete s.handover;
+          if (s.rateChange && ![s.driverId, s.offeredTo].includes(s.rateChange.driverId))
+            delete s.rateChange;
           if (s.status === 'Offered') s.status = 'Ready to assign';
-          message = 'System: driver offer expired; reservation released';
+          messages.push('System: driver offer expired; reservation released');
         }
-        if (message) {
+        if (messages.length) {
           s.version++;
           persist(s);
-          audit(s, { id: s.storeId }, message);
+          audit(s, { id: s.storeId }, messages.join(' '), previousRecipients);
         }
       }
     });
@@ -102,10 +134,12 @@ export function createOperations({
       s.offeredTo = null;
       delete s.handover;
       delete s.offerExpiresAt;
+      if (s.rateChange && ![s.driverId, s.offeredTo].includes(s.rateChange.driverId))
+        delete s.rateChange;
       if (s.status === 'Offered') s.status = 'Ready to assign';
       s.version++;
       persist(s);
-      audit(s, actor, `Offer withdrawn: ${reason}`);
+      audit(s, actor, `Offer withdrawn: ${reason}`, [driverId]);
     }
   }
   function driverReview(id, actor, data) {
@@ -153,10 +187,11 @@ export function createOperations({
     requireThat(Number.isSafeInteger(result), 400, 'Amount is too large.');
     return result;
   };
+  const settlements = createSettlements({ db, requireThat, cents, text, now });
   function invoiceView(row, user) {
     const entries = db
       .prepare(
-        'SELECT id,kind,amount_cents AS amountCents,reference,reason,created_at AS createdAt FROM invoice_entries WHERE invoice_id=? ORDER BY created_at,id',
+        'SELECT id,kind,amount_cents AS amountCents,reference,reason,driver_id AS driverId,created_at AS createdAt FROM invoice_entries WHERE invoice_id=? ORDER BY created_at,id',
       )
       .all(row.id);
     const sum = (kind) =>
@@ -166,14 +201,19 @@ export function createOperations({
     const total = row.amount_cents + row.tax_cents + sum('adjustment'),
       paid = sum('payment') - sum('refund'),
       payout = sum('payout') - sum('payoutRefund');
+    const allocations = settlements.read(row.id);
+    const ownAllocation = allocations.find((a) => a.driverId === user.id);
     if (user.role === 'driver')
       return {
         id: row.id,
         shipmentId: row.shipment_id,
-        rateCents: row.rate_cents,
-        paidCents: payout,
-        dueCents: row.rate_cents - payout,
-        entries: entries.filter((e) => ['payout', 'payoutRefund'].includes(e.kind)),
+        rateCents: ownAllocation?.rateCents || 0,
+        paidCents: ownAllocation?.paidCents || 0,
+        dueCents: ownAllocation?.dueCents || 0,
+        allocationReason: ownAllocation?.reason || '',
+        entries: entries.filter(
+          (e) => ['payout', 'payoutRefund'].includes(e.kind) && e.driverId === user.id,
+        ),
       };
     return {
       id: row.id,
@@ -186,7 +226,17 @@ export function createOperations({
       paidCents: paid,
       dueCents: total - paid,
       ...(user.role === 'admin'
-        ? { rateCents: row.rate_cents, payoutCents: payout }
+        ? {
+            rateCents: row.rate_cents,
+            payoutCents: payout,
+            allocations,
+            participants: settlements.participants(
+              shipments(user, row.shipment_id, false)[0],
+            ),
+            allocationRequired: settlements
+              .participants(shipments(user, row.shipment_id, false)[0])
+              .some((p) => !allocations.some((a) => a.driverId === p.driverId)),
+          }
         : {}),
       entries:
         user.role === 'admin'
@@ -197,7 +247,7 @@ export function createOperations({
   function invoices(user) {
     return db
       .prepare(
-        `SELECT i.* FROM invoices i JOIN shipments s ON s.id=i.shipment_id ${user.role === 'store' ? 'WHERE s.store_id=?' : user.role === 'driver' ? 'WHERE i.driver_id=?' : ''} ORDER BY i.created_at DESC,i.id`,
+        `SELECT i.* FROM invoices i JOIN shipments s ON s.id=i.shipment_id ${user.role === 'store' ? 'WHERE s.store_id=?' : user.role === 'driver' ? 'WHERE EXISTS(SELECT 1 FROM invoice_allocations a WHERE a.invoice_id=i.id AND a.driver_id=?)' : ''} ORDER BY i.created_at DESC,i.id`,
       )
       .all(...(user.role === 'admin' ? [] : [user.id]))
       .map((row) => invoiceView(row, user));
@@ -245,7 +295,13 @@ export function createOperations({
         .get(s.id);
       const current = previous ? JSON.parse(previous.data) : {};
       if (req.method === 'GET') {
-        send(res, 200, current);
+        send(
+          res,
+          200,
+          s.status === 'Delivery failed'
+            ? { ...current, eta: null, etaUpdatedAt: null, route: null }
+            : current,
+        );
         return true;
       }
       if (req.method === 'POST') {
@@ -301,6 +357,11 @@ export function createOperations({
           'Only the broker or active driver can update the ETA.',
         );
         const eta = text(data, 'eta', true);
+        requireThat(
+          s.status !== 'Delivery failed' || !eta,
+          409,
+          'Arrange redelivery or return before publishing an ETA.',
+        );
         requireThat(
           !eta ||
             (Number.isFinite(Date.parse(eta)) &&
@@ -530,6 +591,31 @@ export function createOperations({
     }
     const evidenceRoute = /^\/api\/shipments\/([^/]+)\/evidence$/.exec(path);
     if (evidenceRoute) {
+      let requestHash;
+      if (req.method === 'POST') {
+        if (data.requestKey !== undefined) {
+          requireThat(
+            typeof data.requestKey === 'string' &&
+              /^[A-Za-z0-9_-]{16,128}$/.test(data.requestKey),
+            400,
+            'Invalid evidence request key.',
+          );
+          requestHash = createHash('sha256').update(JSON.stringify(data)).digest('hex');
+          const previous = db
+            .prepare('SELECT * FROM action_requests WHERE user_id=? AND request_key=?')
+            .get(user.id, data.requestKey);
+          if (previous) {
+            requireThat(
+              previous.shipment_id === evidenceRoute[1] &&
+                previous.request_hash === requestHash,
+              409,
+              'Evidence request key was used with different details.',
+            );
+            send(res, 201, JSON.parse(previous.result));
+            return true;
+          }
+        }
+      }
       const s = shipments(user, evidenceRoute[1], false)[0];
       requireThat(s, 404, 'Delivery not found.');
       if (req.method === 'GET') {
@@ -550,28 +636,6 @@ export function createOperations({
           403,
           'Only the broker or assigned driver can attach evidence.',
         );
-        let requestHash;
-        if (data.requestKey !== undefined) {
-          requireThat(
-            typeof data.requestKey === 'string' &&
-              /^[A-Za-z0-9_-]{16,128}$/.test(data.requestKey),
-            400,
-            'Invalid evidence request key.',
-          );
-          requestHash = createHash('sha256').update(JSON.stringify(data)).digest('hex');
-          const previous = db
-            .prepare('SELECT * FROM action_requests WHERE user_id=? AND request_key=?')
-            .get(user.id, data.requestKey);
-          if (previous) {
-            requireThat(
-              previous.shipment_id === s.id && previous.request_hash === requestHash,
-              409,
-              'Evidence request key was used with different details.',
-            );
-            send(res, 201, JSON.parse(previous.result));
-            return true;
-          }
-        }
         requireThat(
           s.version === data.version,
           409,
@@ -608,13 +672,24 @@ export function createOperations({
               : content.subarray(0, 5).toString() === '%PDF-';
         requireThat(signature, 400, 'File content does not match its type.');
         transaction(db, () => {
+          const count = db
+            .prepare('SELECT COUNT(*) AS n FROM evidence WHERE shipment_id=?')
+            .get(s.id).n;
+          const needsProof =
+            s.status === 'In transit' &&
+            !db
+              .prepare(
+                'SELECT 1 FROM evidence WHERE shipment_id=? AND pickup_version=? AND delivery_attempt=?',
+              )
+              .get(s.id, s.pickupVersion || 0, deliveryAttempt(s));
           requireThat(
-            db.prepare('SELECT count(*) AS n FROM evidence WHERE shipment_id=?').get(s.id)
-              .n < 10,
+            count < 10 || needsProof,
             409,
-            'A delivery can have at most ten files.',
+            'A delivery allows ten general files plus a reserved completion-proof file for each delivery attempt when needed.',
           );
-          db.prepare('INSERT INTO evidence VALUES (?,?,?,?,?,?,?,?)').run(
+          db.prepare(
+            'INSERT INTO evidence(id,shipment_id,actor_id,name,mime,content,sha256,created_at,pickup_version,delivery_attempt) VALUES (?,?,?,?,?,?,?,?,?,?)',
+          ).run(
             randomUUID(),
             s.id,
             user.id,
@@ -623,6 +698,10 @@ export function createOperations({
             content,
             createHash('sha256').update(content).digest('hex'),
             timestamp(),
+            ['In transit', 'Delivery failed', 'Returning'].includes(s.status)
+              ? s.pickupVersion || 0
+              : null,
+            s.status === 'In transit' ? deliveryAttempt(s) : null,
           );
           s.version++;
           persist(s);
@@ -681,7 +760,27 @@ export function createOperations({
         const existing = db
           .prepare('SELECT * FROM invoices WHERE shipment_id=?')
           .get(s.id);
-        if (existing) return invoiceView(existing, user);
+        if (existing) {
+          if (data.allocations !== undefined) {
+            const proposed = settlements.validate(
+              s,
+              data.allocations,
+              existing.rate_cents,
+            );
+            const current = settlements.read(existing.id);
+            requireThat(
+              JSON.stringify(
+                proposed.map((a) => [a.driverId, a.rateCents, a.reason]).sort(),
+              ) ===
+                JSON.stringify(
+                  current.map((a) => [a.driverId, a.rateCents, a.reason]).sort(),
+                ),
+              409,
+              'Invoice already exists with different shares. Review driver payout shares to make a correction.',
+            );
+          }
+          return invoiceView(existing, user);
+        }
         requireThat(
           s.version === data.version,
           409,
@@ -698,6 +797,7 @@ export function createOperations({
           400,
           'Tax must be a nonnegative whole-cent amount.',
         );
+        const allocations = settlements.validate(s, data.allocations, cents(s.rate));
         const id = `INV-${randomUUID()}`;
         db.prepare('INSERT INTO invoices VALUES (?,?,?,?,?,?,1,?)').run(
           id,
@@ -708,10 +808,58 @@ export function createOperations({
           s.driverId,
           timestamp(),
         );
-        audit(s, user, `Invoice issued: ${id}`);
+        settlements.save(id, allocations, user.id);
+        audit(
+          s,
+          user,
+          `Invoice issued: ${id}`,
+          allocations.map((a) => a.driverId),
+        );
         return invoiceView(db.prepare('SELECT * FROM invoices WHERE id=?').get(id), user);
       });
       send(res, 201, result);
+      return true;
+    }
+    const allocationRoute = /^\/api\/invoices\/([^/]+)\/allocations$/.exec(path);
+    if (allocationRoute && req.method === 'POST') {
+      admin();
+      const result = transaction(db, () => {
+        const row = db
+          .prepare('SELECT * FROM invoices WHERE id=?')
+          .get(allocationRoute[1]);
+        requireThat(row, 404, 'Invoice not found.');
+        const s = shipments(user, row.shipment_id, false)[0];
+        const allocations = settlements.validate(s, data.allocations, row.rate_cents);
+        const current = settlements.read(row.id);
+        // An identical retry is safe even if the previous response was lost.
+        if (
+          JSON.stringify(
+            current.map((a) => [a.driverId, a.rateCents, a.reason]).sort(),
+          ) ===
+          JSON.stringify(
+            allocations.map((a) => [a.driverId, a.rateCents, a.reason]).sort(),
+          )
+        )
+          return invoiceView(row, user);
+        requireThat(
+          data.version === row.version,
+          409,
+          'Invoice changed. Refresh before allocating driver shares.',
+        );
+        settlements.save(row.id, allocations, user.id);
+        db.prepare('UPDATE invoices SET version=version+1 WHERE id=?').run(row.id);
+        audit(
+          s,
+          user,
+          'Driver payout allocations recorded',
+          allocations.map((a) => a.driverId),
+        );
+        return invoiceView(
+          db.prepare('SELECT * FROM invoices WHERE id=?').get(row.id),
+          user,
+        );
+      });
+      send(res, 200, result);
       return true;
     }
     const entry = /^\/api\/invoices\/([^/]+)\/entries$/.exec(path);
@@ -741,6 +889,17 @@ export function createOperations({
           400,
           'This entry must be positive.',
         );
+        const allocationList = settlements.read(row.id);
+        const isPayout = ['payout', 'payoutRefund'].includes(kind);
+        const driverId = isPayout
+          ? data.driverId ||
+            (allocationList.length === 1 ? allocationList[0].driverId : null)
+          : null;
+        requireThat(
+          !isPayout || allocationList.some((a) => a.driverId === driverId),
+          400,
+          'Choose the allocated driver for this payout or reversal.',
+        );
         const previous = db
           .prepare('SELECT * FROM invoice_entries WHERE invoice_id=? AND request_key=?')
           .get(row.id, key);
@@ -749,7 +908,8 @@ export function createOperations({
             previous.kind === kind &&
               previous.amount_cents === amount &&
               previous.reference === reference &&
-              previous.reason === reason,
+              previous.reason === reason &&
+              previous.driver_id === driverId,
             409,
             'Request key was already used for a different entry.',
           );
@@ -761,6 +921,12 @@ export function createOperations({
           'Invoice changed. Refresh before posting.',
         );
         const view = invoiceView(row, user);
+        requireThat(
+          kind !== 'payout' || !view.allocationRequired,
+          409,
+          'Review and allocate every cargo driver before recording payouts.',
+        );
+        const driverAllocation = allocationList.find((a) => a.driverId === driverId);
         requireThat(
           kind !== 'payment' || amount <= view.dueCents,
           409,
@@ -777,16 +943,18 @@ export function createOperations({
           'Adjustment would reduce the total below payments received.',
         );
         requireThat(
-          kind !== 'payout' || amount <= view.rateCents - view.payoutCents,
+          kind !== 'payout' || amount <= driverAllocation.dueCents,
           409,
           'Payout exceeds the agreed driver rate.',
         );
         requireThat(
-          kind !== 'payoutRefund' || amount <= view.payoutCents,
+          kind !== 'payoutRefund' || amount <= driverAllocation.paidCents,
           409,
           'Payout reversal exceeds payouts recorded.',
         );
-        db.prepare('INSERT INTO invoice_entries VALUES (?,?,?,?,?,?,?,?,?)').run(
+        db.prepare(
+          'INSERT INTO invoice_entries(id,invoice_id,request_key,kind,amount_cents,reference,reason,actor_id,created_at,driver_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        ).run(
           randomUUID(),
           row.id,
           key,
@@ -796,10 +964,11 @@ export function createOperations({
           reason,
           user.id,
           timestamp(),
+          driverId,
         );
         db.prepare('UPDATE invoices SET version=version+1 WHERE id=?').run(row.id);
         const s = shipments(user, row.shipment_id, false)[0];
-        audit(s, user, `Financial entry recorded: ${kind}`);
+        audit(s, user, `Financial entry recorded: ${kind}`, driverId ? [driverId] : []);
         return invoiceView(
           db.prepare('SELECT * FROM invoices WHERE id=?').get(row.id),
           user,

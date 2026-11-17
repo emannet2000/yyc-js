@@ -143,7 +143,10 @@ export function createMobility({
       status: s.status,
       date: s.date,
       window: s.window,
-      eta: terminal.includes(s.status) || staleAutomaticEta ? null : t.eta || null,
+      eta:
+        terminal.includes(s.status) || s.status === 'Delivery failed' || staleAutomaticEta
+          ? null
+          : t.eta || null,
       etaUpdatedAt: t.etaUpdatedAt || null,
       stopsCompleted: (s.stops || []).filter((stop) => stop.completedAt).length,
       stopsTotal: (s.stops || []).length,
@@ -182,7 +185,11 @@ export function createMobility({
       return true;
     }
     if (req.method === 'GET') {
-      send(res, 200, tracking(s.id).route || null);
+      send(
+        res,
+        200,
+        s.status === 'Delivery failed' ? null : tracking(s.id).route || null,
+      );
       return true;
     }
     requireThat(req.method === 'POST', 405, 'Use GET or POST.');
@@ -196,6 +203,11 @@ export function createMobility({
     return true;
   }
   async function routeFor(s, user) {
+    requireThat(
+      s.status !== 'Delivery failed',
+      409,
+      'Arrange redelivery or return before calculating an ETA.',
+    );
     requireThat(
       calculateRoute,
       503,
@@ -309,11 +321,7 @@ export function createMobility({
     if (attempts.size >= 10000) attempts.delete(attempts.keys().next().value);
     attempts.set(id, now());
     const s = shipments(user, id, false)[0];
-    if (
-      !s ||
-      !['Assigned', 'In transit', 'Delivery failed', 'Returning'].includes(s.status)
-    )
-      return;
+    if (!s || !['Assigned', 'In transit', 'Returning'].includes(s.status)) return;
     try {
       await routeFor(s, user);
     } catch {

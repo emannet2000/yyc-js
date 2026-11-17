@@ -13,6 +13,13 @@ export type Status =
   | 'Delivered'
   | 'Cancelled';
 export type Action =
+  | 'withdrawRequest'
+  | 'requestChange'
+  | 'respondRequest'
+  | 'changeRate'
+  | 'acceptRate'
+  | 'declineRate'
+  | 'withdrawRateChange'
   | 'attachEvidence'
   | 'setStops'
   | 'completeStop'

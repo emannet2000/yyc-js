@@ -18,6 +18,22 @@ export function nextStep(s: Shipment, user: User, jobs: Shipment[] = []): NextSt
       s.status === 'Cancelled' ? 'Request closed' : 'Delivery closed',
       'Review the recorded evidence and activity history.',
     );
+  if (user.role === 'admin' && s.customerRequests?.some((r) => r.status === 'pending'))
+    return step(
+      'Review the owner request',
+      'Approve and apply the proposed change, or decline with clear instructions in Owner requests.',
+      true,
+      5,
+    );
+  if (user.role === 'driver' && s.rateChange?.driverId === user.id)
+    return step(
+      'Review the proposed driver rate',
+      user.approved && user.truck?.approved && !user.disabled
+        ? 'Accept the new rate or keep your existing agreed rate. Your assignment remains in place.'
+        : 'Ask the broker to review your driver and truck approvals before accepting a new rate. You can still keep your existing agreed rate.',
+      !!(user.approved && user.truck?.approved && !user.disabled),
+      12,
+    );
   if (user.role === 'driver' && s.offeredTo === user.id)
     return step(
       s.handover ? 'Review driver handover' : 'Review job offer',
@@ -34,7 +50,8 @@ export function nextStep(s: Shipment, user: User, jobs: Shipment[] = []): NextSt
       'Approval required before continuing',
       'Ask the broker to review your driver and truck approvals.',
     );
-  if (s.issue && !s.issue.resolved)
+  const involved = user.role !== 'driver' || s.driverId === user.id;
+  if (s.issue && !s.issue.resolved && involved)
     return step(
       user.role === 'admin'
         ? 'Resolve the open exception'
@@ -45,7 +62,7 @@ export function nextStep(s: Shipment, user: User, jobs: Shipment[] = []): NextSt
       user.role === 'admin',
       0,
     );
-  if (s.status === 'Delivery failed')
+  if (s.status === 'Delivery failed' && involved)
     return step(
       user.role === 'admin'
         ? 'Choose redelivery or return'

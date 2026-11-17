@@ -6,11 +6,15 @@ export function DeliveryEvidence({
   onChange,
   onSave,
   busy,
+  arrived,
+  evidenceCount,
 }: {
   draft: EvidenceDraft;
   onChange: (draft: EvidenceDraft) => void;
   onSave: (draft: EvidenceDraft) => Promise<void>;
   busy: boolean;
+  arrived: boolean;
+  evidenceCount: number;
 }) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -40,6 +44,12 @@ export function DeliveryEvidence({
           onChange={(event) => onChange({ ...draft, recipient: event.target.value })}
         />
       </div>
+      <p role="status">
+        Delivery policy: record arrival at the final destination and attach a delivery
+        photo, signature image, or receipt for this delivery attempt in Evidence files
+        before confirming. {arrived ? 'Arrival recorded.' : 'Arrival still required.'}{' '}
+        {evidenceCount ? 'Evidence attached.' : 'Evidence file still required.'}
+      </p>
       <p className="muted">
         If another update changes this delivery, review the latest details before
         resubmitting. Your entered evidence is kept during refreshes and while this

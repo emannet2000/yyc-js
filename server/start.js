@@ -1,38 +1,35 @@
 import { resolve } from 'node:path';
+import { startupConfig } from './config.js';
 import { createBackupPolicy } from './maintenance.js';
 import { configuredWebhook, configuredBackupUpload } from './integrations.js';
 import { configuredResetDelivery } from './reset-delivery.js';
 import { createRoadRouter } from './routing.js';
 import { createApplication } from './app.js';
+const config = startupConfig();
 const app = createApplication({
   calculateRoute: createRoadRouter(),
-  databasePath: process.env.DATABASE_PATH,
-  publicOrigin:
-    process.env.PUBLIC_ORIGIN || `http://127.0.0.1:${process.env.PORT || 3000}`,
+  databasePath: config.databasePath,
+  publicOrigin: config.publicOrigin,
   sendResetLink: configuredResetDelivery(),
   sendNotification: configuredWebhook('NOTIFICATION_DELIVERY'),
-  secureCookies: process.env.COOKIE_SECURE === 'true',
+  secureCookies: config.secureCookies,
 });
-const port = Number(process.env.PORT || 3000),
-  host = process.env.HOST || '0.0.0.0';
-app.server.listen(port, host, () =>
-  console.log(`YYC workspace: http://${host}:${port}/react/`),
-);
-const backupInterval = Number(process.env.BACKUP_INTERVAL_HOURS || 24) * 3600000;
-if (!Number.isFinite(backupInterval) || backupInterval < 60000)
-  throw new Error('Backup interval must be at least one minute.');
 const backups = createBackupPolicy({
-  source: process.env.DATABASE_PATH || resolve('data/yyc.sqlite'),
+  source: config.databasePath,
   directory: process.env.BACKUP_DIRECTORY || resolve('data/backups'),
-  keep: Number(process.env.BACKUP_KEEP || 14),
+  keep: config.backupKeep,
   upload: configuredBackupUpload(),
   alert: configuredWebhook('OPERATIONS_ALERT'),
 });
+const { port, host } = config;
+app.server.listen(port, host, () =>
+  console.log(`YYC workspace: http://${host}:${port}/react/`),
+);
 const backup = () =>
   void backups
     .run()
     .catch(() => console.error('Scheduled backup failed. Check backup last-run.json.'));
-const backupTimer = setInterval(backup, backupInterval);
+const backupTimer = setInterval(backup, config.backupInterval);
 backupTimer.unref();
 backup();
 const notificationTimer = setInterval(() => {

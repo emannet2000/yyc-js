@@ -63,7 +63,7 @@ export function backupDatabase(source, destination, { restore = false } = {}) {
           .get()
       )
         db.exec('DELETE FROM recipient_links;');
-      for (const table of ['mobile_devices', 'mobile_pairings']) {
+      for (const table of ['mobile_devices', 'mobile_pairings', 'bootstrap_tokens']) {
         if (
           db
             .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?")

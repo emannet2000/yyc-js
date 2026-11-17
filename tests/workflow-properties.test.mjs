@@ -80,6 +80,19 @@ test('workflow property: generated delivery traces enforce authorization, transi
         };
       }
       async function perform(command, step) {
+        if (command.action === 'deliver' && model.status === 'In transit') {
+          const s = (await admin('/api/state')).value.shipments.find((s) => s.id === id);
+          if (!s.evidenceCount) {
+            const reply = await admin(`/api/shipments/${id}/evidence`, 'POST', {
+              version: model.version,
+              name: 'receipt.pdf',
+              mime: 'application/pdf',
+              content: Buffer.from('%PDF-1.4\nProperty evidence').toString('base64'),
+            });
+            assert.equal(reply.status, 201);
+            model.version++;
+          }
+        }
         const before = snapshot();
         const active = ['Assigned', 'In transit'].includes(model.status);
         const visible =
@@ -113,6 +126,7 @@ test('workflow property: generated delivery traces enforce authorization, transi
             command.actor === 'driver' &&
             model.driverId === driverId &&
             model.status === 'In transit' &&
+            model.arrived &&
             !model.openIssue,
           issue:
             command.actor === 'driver' &&
@@ -269,7 +283,7 @@ test('workflow property: generated delivery traces enforce authorization, transi
             ? ['admin', 'resolve']
             : !model.reported
               ? ['driver', 'issue']
-              : ['driver', 'deliver'],
+              : ['driver', model.arrived ? 'deliver' : 'arrival'],
         }[model.status] || ['admin', 'pickup'];
         return { actor: next[0], action: next[1], stale: false, invalid: false };
       }

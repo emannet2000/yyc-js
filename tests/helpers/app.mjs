@@ -158,7 +158,31 @@ export async function setup(t, options) {
   const driverId = (await driver('/api/state')).value.user.id;
   return { ...server, admin, store, driver, other, driverId };
 }
+export const proofFile = {
+  name: 'delivery-receipt.pdf',
+  mime: 'application/pdf',
+  content: Buffer.from('%PDF-1.4\nDelivery receipt fixture').toString('base64'),
+};
+export async function attachDeliveryEvidence(client, id) {
+  const s = (await client('/api/state')).value.shipments.find((s) => s.id === id);
+  assert.equal(
+    (
+      await client(`/api/shipments/${id}/evidence`, 'POST', {
+        ...proofFile,
+        version: s.version,
+      })
+    ).status,
+    201,
+  );
+}
+// Successful delivery scenarios include the required evidence milestones.
+// Guard/rollback tests use raw requests or an explicit non-success expectation.
 export async function action(client, id, actionName, data = {}, expected = 200) {
+  if (actionName === 'deliver' && expected === 200) {
+    const current = (await client('/api/state')).value.shipments.find((s) => s.id === id);
+    if (!current.arrivedAt) await action(client, id, 'arrival');
+    if (!current.evidenceCount) await attachDeliveryEvidence(client, id);
+  }
   const s = (await client('/api/state')).value.shipments.find((s) => s.id === id);
   const response = await client(`/api/shipments/${id}/actions`, 'POST', {
     version: s.version,

@@ -2,7 +2,6 @@ import { defineConfig } from 'vite';
 const proxy = {
   '/api': 'http://127.0.0.1:3000',
   '/assets': 'http://127.0.0.1:3000',
-  '/demo': 'http://127.0.0.1:3000',
 };
 export default defineConfig({
   root: 'frontend',

@@ -7,7 +7,7 @@
     "dev": "node scripts/dev.js",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint frontend shared server tests scripts/dev.js vite.config.ts playwright.config.js && node scripts/check-demo.cjs",
+    "lint": "eslint frontend shared server tests scripts vite.config.ts playwright.config.js",
     "format:check": "prettier --check frontend shared server tests scripts vite.config.ts eslint.config.js package.json README.md CODE_REVIEW.md playwright.config.js .github/workflows",
     "preview": "vite preview",
     "start": "node server/start.js",
@@ -21,7 +21,8 @@
     "test:workflows": "node --test tests/workflow*.test.mjs tests/*dom.test.mjs",
     "backup:scheduled": "node server/maintenance-cli.js backup",
     "recovery:drill": "node server/maintenance-cli.js drill",
-    "start:configured": "node --env-file=.env server/start.js"
+    "start:configured": "node --env-file=.env server/start.js",
+    "setup": "node server/setup.js"
   },
   "dependencies": {
     "react": "19.3.1",

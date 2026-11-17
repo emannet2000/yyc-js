@@ -36,6 +36,10 @@ interface AppState {
   needsRefresh: boolean;
   refreshReason: 'saved' | 'conflict' | null;
 
+  assignmentAlert: string;
+  syncError: string;
+  refreshVersion: number;
+  sync: () => Promise<void>;
   boot: () => Promise<void>;
   refresh: () => Promise<void>;
   save: (
@@ -67,8 +71,31 @@ async function refreshWorkspace(
       ui.close();
       ui.syncDeliveryDrafts(next.user.id, [], []);
     }
+    const previous = get().state;
+    if (previous?.user.id === next.user.id && next.user.role === 'driver') {
+      const removed = previous.shipments.filter(
+        (s) =>
+          s.driverId === next.user.id &&
+          !['Delivered', 'Returned', 'Cancelled'].includes(s.status) &&
+          !next.shipments.some((n) => n.id === s.id && n.driverId === next.user.id),
+      );
+      if (removed.length)
+        set({
+          assignmentAlert: `Your assignment changed for ${removed.map((s) => s.id).join(', ')}. Stop following the previous instructions and review Notifications.`,
+        });
+    } else if (previous?.user.id !== next.user.id) set({ assignmentAlert: '' });
     cacheWorkspace(next);
-    set({ state: projectQueue(next), needsRefresh: false, refreshReason: null });
+    const projected = projectQueue(next);
+    set({
+      state:
+        JSON.stringify(get().state) === JSON.stringify(projected)
+          ? get().state
+          : projected,
+      needsRefresh: false,
+      refreshReason: null,
+      syncError: '',
+      refreshVersion: get().refreshVersion + 1,
+    });
     return getSessionRevision();
   } catch (e) {
     if (revision !== getSessionRevision() || sequence !== refreshSequence) return;
@@ -84,6 +111,40 @@ export const useAppStore = create<AppState>((set, get) => ({
   message: '',
   needsRefresh: false,
   refreshReason: null,
+  assignmentAlert: '',
+  syncError: '',
+  refreshVersion: 0,
+
+  async sync() {
+    if (
+      get().busy ||
+      get().needsRefresh ||
+      !get().state ||
+      pendingActions(get().state!.user.id).length
+    )
+      return;
+    const revision = getSessionRevision();
+    try {
+      await get().refresh();
+    } catch (e) {
+      if (revision !== getSessionRevision()) return;
+      if (e instanceof ApiError && e.status === 401) {
+        useTracking.getState().stop();
+        clearOfflineWorkspace();
+        setCsrf(null);
+        set({
+          state: null,
+          syncError: '',
+          message: 'Your session expired. Log in to continue.',
+        });
+      } else {
+        set({
+          syncError:
+            'Live updates are unavailable. Displayed instructions may be out of date; refresh before acting.',
+        });
+      }
+    }
+  },
 
   async boot() {
     let revision = getSessionRevision();
@@ -199,6 +260,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async run(work) {
     if (get().busy) return;
+    refreshSequence++;
     set({ busy: true, message: '' });
     const revision = getSessionRevision();
     try {
@@ -263,7 +325,17 @@ export const useAppStore = create<AppState>((set, get) => ({
             await sendDriverAction(entry);
             if (revision !== getSessionRevision()) return;
             discardPending(owner, entry.requestKey);
-            useUiStore.getState().clearActionDraft(owner, id, action);
+            useUiStore
+              .getState()
+              .clearActionDraft(
+                owner,
+                id,
+                action,
+                ['respondRequest', 'withdrawRequest'].includes(action) &&
+                  typeof data.requestId === 'string'
+                  ? data.requestId
+                  : undefined,
+              );
             try {
               await get().refresh();
               if (revision !== getSessionRevision()) return;
@@ -304,7 +376,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         }),
       'Delivery updated.',
       () => {
-        if (owner) useUiStore.getState().clearActionDraft(owner, id, action);
+        if (owner)
+          useUiStore
+            .getState()
+            .clearActionDraft(
+              owner,
+              id,
+              action,
+              ['respondRequest', 'withdrawRequest'].includes(action) &&
+                typeof data.requestId === 'string'
+                ? data.requestId
+                : undefined,
+            );
       },
     );
   },

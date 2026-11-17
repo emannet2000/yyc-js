@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderApp } from './helpers/dom.mjs';
-import { setup, booking, action } from './helpers/app.mjs';
+import { setup, booking, action, attachDeliveryEvidence } from './helpers/app.mjs';
 
 async function openDelivery(t) {
   const f = await setup(t);
@@ -12,6 +12,7 @@ async function openDelivery(t) {
   await action(f.admin, id, 'offer', { driverId: f.driverId });
   await action(f.driver, id, 'acceptJob');
   await action(f.driver, id, 'pickup');
+  await attachDeliveryEvidence(f.driver, id);
   const ui = await renderApp(t, f.driver);
   await ui.drawer('input[name="pod"]');
   await ui.input('pod', 'DRAFT-RECEIPT-123');

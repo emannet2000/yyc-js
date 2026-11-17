@@ -15,10 +15,16 @@ import { driverAvailable, canTakeCargo } from '../shared/scheduling.js';
 import { createLoginLimiter } from './login-limiter.js';
 import { createRegistrationLimiter } from './registration-limiter.js';
 import { isPositiveMoney } from '../shared/money.js';
-import { prePickup, cargoStates, validDeadline } from '../shared/planning.js';
+import {
+  prePickup,
+  cargoStates,
+  validDeadline,
+  deliveryAttempt,
+} from '../shared/planning.js';
 import { createOperations } from './operations.js';
 import { createMobility } from './mobility.js';
 import { createMobile } from './mobile.js';
+import { createWorkflow } from './workflow.js';
 
 const deriveKey = promisify(scrypt);
 const project = fileURLToPath(new URL('../', import.meta.url));
@@ -141,6 +147,7 @@ export function createApplication({
     CREATE INDEX IF NOT EXISTS shipments_store ON shipments(store_id,created_at DESC);
     CREATE INDEX IF NOT EXISTS shipments_offer ON shipments(offered_to);
     CREATE INDEX IF NOT EXISTS audit_shipment ON audit(shipment_id,id);
+    CREATE TABLE IF NOT EXISTS bootstrap_tokens(token_hash TEXT PRIMARY KEY,expires_at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);`);
   const loginLimiter = createLoginLimiter();
   const registrationLimiter = createRegistrationLimiter();
@@ -293,11 +300,11 @@ export function createApplication({
       )
       .all(driverId, driverId);
   }
-  function audit(s, user, event) {
+  function audit(s, user, event, previousRecipients = []) {
     db.prepare(
       'INSERT INTO audit(shipment_id,actor_id,event,created_at) VALUES (?,?,?,?)',
     ).run(s.id, user.id, event, new Date(now()).toISOString());
-    operations.notifyShipment(s, event);
+    operations.notifyShipment(s, event, previousRecipients);
   }
   function persist(s) {
     const {
@@ -443,7 +450,7 @@ export function createApplication({
       'Truck plate is already registered.',
     );
   }
-  async function register(data, admin = false) {
+  async function register(data, admin = false, setupToken = null) {
     const role = admin ? 'admin' : choice(data, 'role', roles);
     const name = text(data, 'name'),
       email = text(data, 'email').toLowerCase();
@@ -474,6 +481,22 @@ export function createApplication({
     const hash = await passwordHash(value),
       id = randomUUID();
     return transaction(db, () => {
+      if (setupToken !== null) {
+        requireThat(
+          !db.prepare("SELECT 1 FROM users WHERE role='admin'").get(),
+          409,
+          'Workspace setup is already complete.',
+        );
+        const token = db
+          .prepare('SELECT expires_at FROM bootstrap_tokens WHERE token_hash=?')
+          .get(sha256(setupToken));
+        requireThat(
+          token && token.expires_at > now(),
+          403,
+          'Setup token is invalid or expired. Ask the operator for a new token.',
+        );
+        db.prepare('DELETE FROM bootstrap_tokens').run();
+      }
       // Another request may have registered while password hashing was pending.
       checkRegistrationAvailable(email, truck);
       db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?,?,?)').run(
@@ -557,8 +580,6 @@ export function createApplication({
   }
   function applyAction(id, user, data) {
     return transaction(db, () => {
-      const s = shipments(user, id, false)[0];
-      requireThat(s, 404, 'Delivery not found.');
       let requestHash;
       if (data.requestKey !== undefined) {
         requireThat(
@@ -580,11 +601,14 @@ export function createApplication({
           return JSON.parse(previous.result);
         }
       }
+      const s = shipments(user, id, false)[0];
+      requireThat(s, 404, 'Delivery not found.');
       requireThat(
         data.version === s.version,
         409,
         'Delivery changed. Refresh and review before trying again.',
       );
+      const previousRecipients = [s.driverId, s.offeredTo];
       const admin = user.role === 'admin',
         owner = user.role === 'store' && s.storeId === user.id;
       const assigned = user.role === 'driver' && s.driverId === user.id;
@@ -597,7 +621,8 @@ export function createApplication({
           'This action is not available for this account and delivery state.',
         );
       let message;
-      const stopMessage = mobility.stopAction(s, user, data);
+      const stopMessage =
+        workflow.apply(s, user, data) || mobility.stopAction(s, user, data);
       if (stopMessage) message = stopMessage;
       else
         switch (data.action) {
@@ -675,6 +700,7 @@ export function createApplication({
               409,
               'The driver has another reservation during redelivery.',
             );
+            s.deliveryAttempt = (s.deliveryAttempt || s.failedAttempts?.length || 1) + 1;
             Object.assign(s, plan, { status: 'In transit', offeredTo: null });
             delete s.handover;
             delete s.offerExpiresAt;
@@ -728,6 +754,10 @@ export function createApplication({
                   s.status,
                 ),
             );
+            if (data.price === s.price) {
+              message = workflow.changeRate(s, user, data);
+              break;
+            }
             const price = money(data, 'price'),
               rate = money(data, 'rate'),
               reason = text(data, 'reason');
@@ -901,7 +931,13 @@ export function createApplication({
             allowed(assigned && active);
             requireThat(!s.arrivedAt, 409, 'Arrival is already recorded for this leg.');
             s.arrivedAt = new Date().toISOString();
-            message = `Arrival recorded at ${s.status === 'Assigned' ? 'pickup' : 'delivery'}`;
+            message = `Arrival recorded at ${
+              s.status === 'Assigned'
+                ? 'pickup'
+                : s.status === 'Returning'
+                  ? 'return pickup'
+                  : 'delivery'
+            }`;
             break;
           case 'pickup':
             allowed(assigned && s.status === 'Assigned' && suitable(s, user));
@@ -918,9 +954,13 @@ export function createApplication({
             s.pickupArrivedAt = s.arrivedAt || null;
             delete s.arrivedAt;
             s.status = 'In transit';
+            s.pickupAt = new Date(now()).toISOString();
+            s.pickupVersion = s.version + 1;
+            s.deliveryAttempt = 1;
+            s.pickupDriverId = user.id;
             message = 'Pickup confirmed';
             break;
-          case 'deliver':
+          case 'deliver': {
             allowed(assigned && s.status === 'In transit');
             requireThat(
               !(s.stops || []).some((stop) => !stop.completedAt),
@@ -932,6 +972,30 @@ export function createApplication({
               409,
               'Resolve the open issue before completing delivery.',
             );
+            requireThat(
+              s.arrivedAt,
+              409,
+              'Record arrival at the final destination before confirming delivery.',
+            );
+            const evidence = db
+              .prepare(
+                'SELECT id,sha256 FROM evidence WHERE shipment_id=? AND pickup_version=? AND delivery_attempt=? ORDER BY created_at DESC,id DESC LIMIT 1',
+              )
+              .get(s.id, s.pickupVersion || 0, deliveryAttempt(s));
+            requireThat(
+              evidence,
+              409,
+              'Attach a delivery photo, signature image, or receipt document for this delivery attempt before confirming delivery.',
+            );
+            s.deliveryEvidence = {
+              fileId: evidence.id,
+              sha256: evidence.sha256,
+              arrivedAt: s.arrivedAt,
+              confirmedAt: new Date(now()).toISOString(),
+              driverId: user.id,
+              policy: 'arrival-and-file',
+              attempt: deliveryAttempt(s),
+            };
             s.pod = text(data, 'pod');
             s.recipient = text(data, 'recipient');
             s.status = 'Delivered';
@@ -940,6 +1004,7 @@ export function createApplication({
             delete s.handover;
             message = 'Delivery confirmed';
             break;
+          }
           case 'issue':
             allowed(assigned && active && (!s.issue || s.issue.resolved));
             s.issueArchive = [...(s.issueArchive || []), ...(s.issue ? [s.issue] : [])];
@@ -1016,6 +1081,21 @@ export function createApplication({
           default:
             throw new HttpError(400, 'Unknown delivery action.');
         }
+      if (
+        s.rateChange &&
+        (!prePickup.includes(s.status) ||
+          ![s.driverId, s.offeredTo].includes(s.rateChange.driverId))
+      )
+        delete s.rateChange;
+      if (['Delivered', 'Returned', 'Cancelled'].includes(s.status)) {
+        for (const request of s.customerRequests || [])
+          if (request.status === 'pending')
+            Object.assign(request, {
+              status: 'closed',
+              response: 'Delivery closed before this request was approved.',
+              resolvedAt: new Date(now()).toISOString(),
+            });
+      }
       s.version++;
       persist(s);
       if (['Delivered', 'Returned', 'Cancelled'].includes(s.status)) {
@@ -1031,7 +1111,7 @@ export function createApplication({
           'DELETE FROM mobile_pairings WHERE shipment_id=? AND user_id IS NOT ?',
         ).run(id, s.driverId);
       }
-      audit(s, user, message);
+      audit(s, user, message, previousRecipients);
       const result = { version: s.version };
       if (data.requestKey)
         db.prepare('INSERT INTO action_requests VALUES (?,?,?,?,?)').run(
@@ -1045,6 +1125,8 @@ export function createApplication({
       if (
         [
           'pickup',
+          'failDelivery',
+          'redeliver',
           'completeStop',
           'deliver',
           'return',
@@ -1054,6 +1136,7 @@ export function createApplication({
           'reschedule',
           'handover',
           'acceptJob',
+          'respondRequest',
         ].includes(data.action)
       ) {
         const row = db.prepare('SELECT data FROM tracking WHERE shipment_id=?').get(id);
@@ -1082,11 +1165,16 @@ export function createApplication({
       res.end();
       return;
     }
-    if (pathname === '/react' || pathname === '/demo') {
+    if (pathname === '/react') {
       res.writeHead(302, { Location: pathname + '/' });
       res.end();
       return;
     }
+    requireThat(
+      pathname.startsWith('/react/') || pathname.startsWith('/assets/'),
+      404,
+      'File not found.',
+    );
     const path = resolve(
       publicPath,
       '.' + pathname + (pathname.endsWith('/') ? 'index.html' : ''),
@@ -1158,7 +1246,12 @@ export function createApplication({
     operations,
     mobility,
   });
+  const workflow = createWorkflow({ now, requireThat, text, positive, money });
   const server = createServer(async (req, res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Frame-Options', 'DENY');
+    if (secureCookies) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     try {
       let path;
       try {
@@ -1197,6 +1290,41 @@ export function createApplication({
           403,
           'Cross-origin requests are not allowed.',
         );
+      }
+      if (path === '/api/setup' && req.method === 'GET') {
+        send(res, 200, {
+          required: !db.prepare("SELECT 1 FROM users WHERE role='admin'").get(),
+        });
+        return;
+      }
+      if (path === '/api/setup' && req.method === 'POST') {
+        const data = await readBody(req);
+        const release = registrationLimiter.reserve(req.socket.remoteAddress || 'local');
+        requireThat(release, 429, 'Too many setup attempts. Try again later.');
+        try {
+          requireThat(
+            !db.prepare("SELECT 1 FROM users WHERE role='admin'").get(),
+            409,
+            'Workspace setup is already complete.',
+          );
+          requireThat(
+            typeof data.token === 'string' && /^[a-f0-9]{64}$/.test(data.token),
+            403,
+            'A valid operator setup token is required.',
+          );
+          const token = db
+            .prepare('SELECT expires_at FROM bootstrap_tokens WHERE token_hash=?')
+            .get(sha256(data.token));
+          requireThat(
+            token && token.expires_at > now(),
+            403,
+            'Setup token is invalid or expired.',
+          );
+          send(res, 201, await register(data, true, data.token));
+        } finally {
+          release();
+        }
+        return;
       }
       if (
         req.method === 'POST' &&
@@ -1349,6 +1477,9 @@ export function createApplication({
         const list = shipments(user).map((s) => {
           if (user.role === 'store') {
             delete s.rate;
+            delete s.rateHistory;
+            delete s.rateChange;
+            delete s.rateVersion;
             s.quoteArchive = s.quoteArchive?.map(({ rate: _rate, ...quote }) => quote);
           }
           if (user.role === 'driver') {
@@ -1357,6 +1488,15 @@ export function createApplication({
           }
           return s;
         });
+        const evidenceCounts = new Map(
+          db
+            .prepare(
+              "SELECT e.shipment_id,COUNT(*) AS n FROM evidence e JOIN shipments s ON s.id=e.shipment_id WHERE (s.store_id=? OR s.driver_id=? OR s.offered_to=? OR ?='admin') AND e.pickup_version=COALESCE(json_extract(s.data,'$.pickupVersion'),0) AND e.delivery_attempt=COALESCE(json_extract(s.data,'$.deliveryAttempt'),json_array_length(COALESCE(json_extract(s.data,'$.failedAttempts'),'[]'))+1) GROUP BY e.shipment_id",
+            )
+            .all(user.id, user.id, user.id, user.role)
+            .map((r) => [r.shipment_id, r.n]),
+        );
+        for (const s of list) s.evidenceCount = evidenceCounts.get(s.id) || 0;
         send(res, 200, {
           csrf: current.csrf,
           user,
@@ -1625,6 +1765,20 @@ export function createApplication({
     processNotifications: operations.processNotifications,
     expire: operations.expire,
     close: () => db.close(),
+    createSetupToken() {
+      requireThat(
+        !db.prepare("SELECT 1 FROM users WHERE role='admin'").get(),
+        409,
+        'Workspace setup is already complete.',
+      );
+      const token = randomBytes(32).toString('hex');
+      db.prepare('DELETE FROM bootstrap_tokens').run();
+      db.prepare('INSERT INTO bootstrap_tokens VALUES (?,?)').run(
+        sha256(token),
+        now() + 30 * 60000,
+      );
+      return token;
+    },
     createAdmin: (data) => register(data, true),
   };
 }

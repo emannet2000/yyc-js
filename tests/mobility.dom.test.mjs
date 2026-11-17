@@ -29,9 +29,35 @@ test('driver records pickup and delivery offline then reconnects and replays in 
   await ui.wait(() => ui.doc.querySelector('input[name="pod"]'));
   await ui.input('pod', 'OFFLINE-POD');
   await ui.input('recipient', 'Receiver');
-  ui.button('Confirm delivery').click();
+  ui.button('Record arrival').click();
   await ui.wait(() =>
     ui.doc.body.textContent.includes('2 action(s) awaiting server confirmation'),
+  );
+  const fileInput = ui.doc.querySelector('input[name="file"]');
+  Object.defineProperty(fileInput, 'files', {
+    configurable: true,
+    value: [
+      new ui.window.File(['%PDF-1.4\nOffline receipt'], 'offline-receipt.pdf', {
+        type: 'application/pdf',
+      }),
+    ],
+  });
+  // jsdom FormData reads its own file slots; provide the selected File to this form.
+  const OriginalFormData = ui.window.FormData;
+  ui.window.FormData = class extends OriginalFormData {
+    get(name) {
+      return name === 'file' ? fileInput.files[0] : super.get(name);
+    }
+  };
+  fileInput
+    .closest('form')
+    .dispatchEvent(new ui.window.Event('submit', { bubbles: true, cancelable: true }));
+  await ui.wait(() =>
+    ui.doc.body.textContent.includes('3 action(s) awaiting server confirmation'),
+  );
+  ui.button('Confirm delivery').click();
+  await ui.wait(() =>
+    ui.doc.body.textContent.includes('4 action(s) awaiting server confirmation'),
   );
   assert.equal((await state(f)).status, 'Assigned');
   const queued = JSON.parse(
@@ -39,7 +65,7 @@ test('driver records pickup and delivery offline then reconnects and replays in 
   );
   assert.deepEqual(
     queued.map((e) => e.action),
-    ['pickup', 'deliver'],
+    ['pickup', 'arrival', 'attachEvidence', 'deliver'],
   );
   assert.equal(queued[1].version, queued[0].version + 1);
   Object.defineProperty(ui.window.navigator, 'onLine', {

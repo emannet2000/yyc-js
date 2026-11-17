@@ -1,6 +1,6 @@
 # YYC Brokers delivery workspace
 
-React and TypeScript frontend, Zustand stores, and a Node.js HTTP API backed by SQLite. Includes a separate fictional screen demo.
+React and TypeScript frontend, Zustand stores, and a Node.js HTTP API backed by SQLite.
 
 ## Setup and development
 
@@ -11,32 +11,35 @@ npm ci
 npm run dev
 ```
 
-This starts the API on `http://127.0.0.1:3000` and Vite on its displayed URL. Open the Vite URL at `/react/`, or the screen demo at `/demo/`. Register a store or driver in the frontend. Driver and truck registrations need broker approval.
+This starts the API on `http://127.0.0.1:3000` and Vite on its displayed URL. Open the Vite URL at `/react/`. Register a store or driver in the frontend. Driver and truck registrations need broker approval.
 
-Create a broker account once, from a separate terminal:
+Set up the first broker account from the login page. An operator first issues a one-time token on the server:
 
 ```sh
-read -r -p 'Broker email: ' ADMIN_EMAIL
-read -r -s -p 'Broker password (12–128 characters): ' ADMIN_PASSWORD
-export ADMIN_EMAIL ADMIN_PASSWORD
-npm run create-admin
-unset ADMIN_PASSWORD ADMIN_EMAIL
+npm run setup
+# With deployment settings: node --env-file=.env server/setup.js
 ```
 
-Public registration cannot create broker accounts. There are no built-in accounts or passwords. `ADMIN_NAME` and `ADMIN_PHONE` can also be set when creating the broker.
+Open the login page, choose **Set up broker account**, enter the token, and choose your own broker name, contact phone, email, and password. The token expires after 30 minutes, is stored as a hash, and is consumed when the first broker is created. Setup closes after the first broker account exists, including when that account is disabled. Public store/driver registration cannot create broker accounts. There are no default credentials. Keep the token private.
+
+Operators can still provision additional brokers or recover access with `npm run create-admin`, using `ADMIN_EMAIL`, `ADMIN_PASSWORD` (12–128 characters), `ADMIN_NAME`, and `ADMIN_PHONE`. With a deployed `.env`, use `node --env-file=.env server/create-admin.js` so provisioning targets the same database as the service. Do not send passwords through chat or commit them to source control.
 
 The default database is `data/yyc.sqlite`. Set `DATABASE_PATH` to use another file; parent directories and an empty schema are created automatically. Existing rows are preserved. Tests use isolated databases and never change the workspace database.
 
 ## Production build and local serving
+
+Use Node.js 22.13 or newer. Copy `.env.example` to `.env`, set `PUBLIC_ORIGIN` to your HTTPS origin, and keep `NODE_ENV=production` and `COOKIE_SECURE=true`. Run `npm ci`, `npm run build`, issue a first-broker token with `node --env-file=.env server/setup.js` then run `npm run start:configured` under a process supervisor and complete **Set up broker account** on the login page. Terminate HTTPS at a reverse proxy forwarding to `127.0.0.1:3000`. Startup rejects invalid production origins, insecure cookies, ephemeral databases and invalid backup settings before opening the listener.
+
+Keep the database and backups on persistent storage accessible only to the service account. Configure off-host backups and alerts using the integrations below, and run a recovery drill before launch. Configure routing and recovery delivery if those features are needed. The listener defaults to localhost; set `HOST` explicitly when a container requires another interface.
 
 ```sh
 npm run build
 npm start
 ```
 
-Open `http://127.0.0.1:3000/react/`. The Node server serves the API, production frontend, logo assets, and demo. The root URL redirects to `/react/`. `HOST` and `PORT` configure the listener; it binds to localhost by default. For HTTPS deployments, set `COOKIE_SECURE=true` and preserve the original Host header through the reverse proxy.
+Open `http://127.0.0.1:3000/react/`. The Node server serves the API, production frontend, and logo assets. The root URL redirects to `/react/`. `HOST` and `PORT` configure the listener; it binds to localhost by default. For HTTPS deployments, set `COOKIE_SECURE=true` and preserve the original Host header through the reverse proxy.
 
-For Vite preview, run `npm start` in one terminal and `npm run preview` in another. Both Vite development and preview proxy `/api`, `/assets`, and `/demo` to the API server on port 3000. If you change the API port, update the proxy target in `vite.config.ts`.
+For Vite preview, run `npm start` in one terminal and `npm run preview` in another. Both Vite development and preview proxy `/api` and `/assets` to the API server on port 3000. If you change the API port, update the proxy target in `vite.config.ts`.
 
 ## Checks
 
@@ -47,7 +50,7 @@ npm run format:check
 npm run build
 ```
 
-Tests cover stale responses across logout and login, registration throttling and concurrency, quote cent precision, malformed URLs/origins, API decoding, booking retries after lost responses and server restarts, per-account login limits, constant database query counts, numeric input constraints, session expiry handling, save/refresh failures, demo exceptions and arrival milestones, account isolation, CSRF, approvals, version conflicts, shipment revisions, delivery completion, scheduling, static routes, and persistence across database reopening. The HTTP handler runs in memory by default so tests work without listening on sockets. Run `YYC_LIVE_TESTS=true npm test` to exercise the same API tests over localhost where socket access is permitted. Demo tests execute the actual classic scripts with a minimal DOM stub; they do not replace a visual browser review.
+Tests cover stale responses across logout and login, registration throttling and concurrency, quote cent precision, malformed URLs/origins, API decoding, booking retries after lost responses and server restarts, per-account login limits, constant database query counts, numeric input constraints, session expiry handling, save/refresh failures, account isolation, CSRF, approvals, version conflicts, shipment revisions, delivery completion, scheduling, static routes, and persistence across database reopening. The HTTP handler runs in memory by default so tests work without listening on sockets. Run `YYC_LIVE_TESTS=true npm test` to exercise the same API tests over localhost where socket access is permitted.
 
 `npm run test:property` runs nine fast-check properties plus an API workflow property. The workflow property generates mixed valid and invalid action sequences against isolated SQLite databases, compares results with an independent state model, checks persisted rollback, and replays booking request keys. Set `WORKFLOW_FC_RUNS` (default 25) to control its scenario count. The nine domain properties cover money, window overlap, driver availability, and modeled login/registration request sequences. Each domain property generates 500 cases using a deterministic seed, and fast-check shrinks failures to a smaller counterexample. Property tests also run with `npm test`.
 
@@ -59,7 +62,7 @@ FC_SEED=12345 FC_RUNS=2000 WORKFLOW_FC_RUNS=75 npm run test:property
 
 Failures report their seed and shrink path. Re-run with that seed and use Node's `--test-name-pattern` option to select the failing property if needed. The limiter models use a bounded set of accounts and addresses; they test limits, expiry, reset and release behavior, not the 10,000-entry storage-cap policy.
 
-`npm run lint` checks frontend, shared, server, test, and development-launcher code, plus syntax of the combined demo scripts. `npm run format` applies formatting to maintained source and documentation.
+`npm run lint` checks frontend, shared, server, test, and development-launcher code. `npm run format` applies formatting to maintained source and documentation.
 
 ## Workflow behavior
 
@@ -87,6 +90,22 @@ Session changes invalidate outstanding workspace and startup requests. A delayed
 
 State reads filter shipments by the signed-in account in SQL, join names and truck profiles, and fetch history in one batch. Query counts stay constant as records grow; action requests read only the target shipment and relevant driver commitments.
 
+## Handoffs, rate changes, and owner requests
+
+Visible workspaces refresh every ten seconds and when the browser regains focus, becomes visible, or reconnects. Background refresh pauses during writes, unresolved refresh failures, and queued offline actions; offline replay refreshes before and after syncing. Connection failures show a stale-instructions warning. Session expiry returns to login. Removing an assignment triggers a persistent driver warning, removes obsolete controls, and creates a notification for both current and former assigned/offered drivers. Email or other external delivery still requires the notification integration; in-app notifications are always recorded.
+
+**Change driver rate** is separate from the customer quotation. A rate-only correction retains the accepted customer price, quote version, and dispatch. Before an assignment or offer, it applies immediately. After a driver has been selected, the proposed rate requires that driver's acceptance; declining retains the agreed rate. Pickup proceeds at the existing agreed rate if a proposal has not been accepted. Customer price changes still require fresh customer acceptance and release previous dispatch commitments. Financial histories and proposed driver rates are hidden from store owners.
+
+Owners can submit quotation-review, destination/cargo-change, and cancellation requests in **Owner requests**. One request can await review at a time. Owners can withdraw it with an explanation. An urgent cancellation request can supersede an older quotation or shipment request, retaining both in the history. Requests leave the current instructions in force until a broker responds. Brokers see requests in their action queue and must approve and apply the change or decline with an explanation. Approved shipment changes require a fresh quotation; approved quotation reviews require a changed customer price and fresh acceptance. Cancelling after collection arranges a return to pickup rather than discarding cargo responsibility. The driver must record a return receipt and receiving contact. Requests and broker decisions remain in the activity history and notify the relevant accounts.
+
+## Delivery evidence policy
+
+Evidence uploaded before pickup never qualifies, even when its timestamp matches pickup. Existing uploads without a pickup version remain available for review but cannot satisfy new completion checks; attach fresh proof for an active legacy trip.
+
+Final delivery requires all intermediate stops completed, no unresolved exception, arrival recorded at the final destination, a delivery evidence file linked to the current pickup version and delivery attempt, a receipt reference, and a recipient name. Upload a delivery photo, signature image, or receipt document under **Evidence files** (PNG, JPEG, or PDF, up to 2 MiB). Ten general evidence files are allowed, with a reserved completion-proof slot for each delivery attempt when the general allowance is full. The server enforces these requirements and stores the evidence ID and SHA-256 hash, driver identity, arrival time, and confirmation time with the completion. A filename or typed name alone cannot complete delivery. These records document what the driver submitted; they do not independently verify recipient identity.
+
+Offline drivers can queue arrival, file attachment, and delivery confirmation in that order after pickup. Evidence bytes remain in account-scoped local storage until replay; large files can exhaust browser storage. Completion remains provisional until the server accepts all actions. A stale assignment stops replay for review.
+
 ## Browser acceptance and CI
 
 ```sh
@@ -94,9 +113,9 @@ npx playwright install --with-deps chromium
 npm run test:browser
 ```
 
-The browser command builds the current frontend and runs four acceptance cases: a delivery lifecycle and account recovery/disable controls, each at desktop and mobile viewport sizes. It verifies native forms, navigation, cookie sessions, CSRF-protected mutations, exception resolution, delivery evidence, page errors and horizontal overflow. Playwright intercepts only HTTP transport and forwards every request to the real Node handler and an isolated SQLite database. It does not mock API responses. This allows the suite to run without opening an HTTP listening port; Chromium itself still needs normal OS process/IPC permissions.
+The browser command builds the current frontend and runs sixteen acceptance cases covering the delivery lifecycle, account recovery/disable controls, first-broker onboarding, automatic quotation updates and owner requests, driver rate consent with assignment removal warnings, cancellation escalation with split-driver payouts, request-specific drafts and return navigation, and rescue handovers with fresh redelivery proof, each at desktop and mobile viewport sizes. It verifies native forms, navigation, cookie sessions, CSRF-protected mutations, exception resolution, delivery evidence, page errors and horizontal overflow. Playwright intercepts only HTTP transport and forwards every request to the real Node handler and an isolated SQLite database. It does not mock API responses. This allows the suite to run without opening an HTTP listening port; Chromium itself still needs normal OS process/IPC permissions.
 
-Use `npx playwright test --list` to inspect the registered cases. Reports and failure screenshots/traces are written to `playwright-report/` and `test-results/`. `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` optionally selects an already installed compatible Chromium. In this managed workspace, browser downloads failed DNS resolution; an npm-packaged Chromium fallback downloaded, but its launch failed with an OS `Operation not permitted` error. The suite is authored and discovers all four cases; local browser execution remains unverified.
+Use `npx playwright test --list` to inspect the registered cases. Reports and failure screenshots/traces are written to `playwright-report/` and `test-results/`. `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` optionally selects an already installed compatible Chromium. Chromium requires normal OS process permissions; this managed workspace runs browser checks outside its process sandbox.
 
 `.github/workflows/checks.yml` runs lint, formatting, unit/integration/property tests, live HTTP integration, the production build and desktop/mobile browser acceptance on pushes and pull requests. Scheduled and manual runs also exercise three recorded seeds that change daily, with 2,000 domain cases per property and 75 workflow scenarios per seed. Failure reports are uploaded as CI artifacts. The workflow has been written and checked locally; it has not been executed on GitHub from this workspace.
 
@@ -135,7 +154,7 @@ No delivery service is configured by default. The public form then directs users
 
 ## Limits and recovery
 
-Location sharing and document uploads are implemented. Online payment processing is not connected; billing records verified external transactions. Road routing requires the provider configuration below. Email recovery requires the optional delivery integration described above. The `/demo/` screens use fictional, in-memory records, and changes reset on refresh. The authenticated `/react/` workspace uses SQLite persistence.
+Location sharing and document uploads are implemented. Online payment processing is not connected; billing records verified external transactions. Road routing requires the provider configuration below. Email recovery requires the optional delivery integration described above. The authenticated `/react/` workspace uses SQLite persistence.
 
 The original package manifest, lockfile, ESLint configuration, formatting ignore file, and README contained only null bytes. Configuration was reconstructed from surviving frontend source and dependency metadata. The missing API was implemented against the surviving database schema; it is a new implementation, not a recovery of the original server. Original documentation and historical API behavior remain unavailable.
 
@@ -157,7 +176,7 @@ For automatic road routing, configure both operator-managed HTTPS endpoints:
 - `GEOCODING_URL`: full URL of a Nominatim-compatible search endpoint.
 - `ROUTING_TOKEN`: optional bearer credential supplied to both services.
 
-Addresses and recent driver coordinates are sent to those configured services only when calculating a route. Choose providers with suitable usage limits and coverage. No public demo endpoint is used by default. As an alternative to these two endpoints, configure the hosted ORS provider described below. **Calculate road route and ETA** returns road distance and driving duration through the remaining stops in their chosen order. **Open route in maps** opens navigation separately. GPS sharing automatically refreshes routing at most once per minute. A next-stop ETA is published only with a driver sample less than five minutes old; planned-address routing provides duration without inventing a current arrival time. Manual ETA entry remains available. Estimates exclude live traffic, stop service times and truck-specific road restrictions. Progress and shipment revisions invalidate the previous route and ETA. Routing errors leave the delivery workflow available.
+Addresses and recent driver coordinates are sent to those configured services only when calculating a route. Choose providers with suitable usage limits and coverage. No public routing endpoint is used by default. As an alternative to these two endpoints, configure the hosted ORS provider described below. **Calculate road route and ETA** returns road distance and driving duration through the remaining stops in their chosen order. **Open route in maps** opens navigation separately. GPS sharing automatically refreshes routing at most once per minute. A next-stop ETA is published only with a driver sample less than five minutes old; planned-address routing provides duration without inventing a current arrival time. Manual ETA entry remains available. Estimates exclude live traffic, stop service times and truck-specific road restrictions. Progress and shipment revisions invalidate the previous route and ETA. Routing errors leave the delivery workflow available.
 
 Brokers and booking stores can create or revoke a **Recipient tracking link**. Links expire in seven days and rotation invalidates the previous link. Recipients do not log in: they see shipment ID, status, pickup date/window, intermediate stop counts and next-stop ETA. They do not receive customer accounts, contact details, cargo, rates, files, other stop addresses or precise driver coordinates. Tokens are random, stored hashed in SQLite and carried in a URL fragment that the recipient page removes from history. Link lookups use a read-only POST to avoid putting secrets in API access logs. Backup restore revokes these links.
 
@@ -186,3 +205,27 @@ Dashboards now show a role-specific **Action required** queue, ordered with open
 Delivery cards and drawers explain the next step or current handoff, including quote/offer expiry times where applicable. Dispatch shows how many drivers meet the truck and schedule requirements and explains excluded drivers individually. These explanations do not change server authorization or bypass scheduling checks. Receipt fields and explicit stop evidence are still required for delivery completion.
 
 A confirmed booking opens its new delivery for review and explains the quotation handoff. Shipment notifications link directly to a delivery only while it remains accessible to the signed-in account. DOM regressions exercise customer quote acceptance, broker failed-delivery handling, unsuitable-truck explanations, notification navigation and booking confirmation.
+
+## Workflow recovery and handover payouts
+
+Action and evidence retries first check the original account’s saved request result. A completed decline or upload can therefore be acknowledged after assignment access ends, including across server restarts, without restoring access to the delivery or repeating the action. Changed payloads and other accounts cannot replay that result. Expiry and withdrawal of offers clear orphaned driver-rate proposals.
+
+Handover invoices require an explicit broker allocation across every driver who actually carried cargo. Shares must be nonnegative amounts in whole cents and total the agreed driver rate exactly. Every share needs an explanation, including zero shares. A sole cargo driver receives the full rate by default. Drivers see only their own allocation and payout entries; customer invoices do not expose the allocation.
+
+In Billing, select a completed delivery, enter each cargo driver's share and reason, then issue the invoice. When posting a payout or payout reversal, select its allocated recipient. Per-driver balances prevent overpayment or excessive reversals. **Review driver payout shares** supports corrections, with invoice-version checks, duplicate-retry handling and retained allocation revisions. Reduce an already-paid allocation only after recording the verified payout reversal. These records do not transfer money.
+
+Existing invoices and historical payments are preserved during migration. Existing handover invoices require broker review of all driver shares before further payouts. Legacy payout entries are attributed to their existing invoice driver. Review those records against actual transfers before reallocating.
+
+## Exception and delivery-attempt rules
+
+Broker decision drafts are scoped to a particular owner request. Refreshing the same request preserves edits; withdrawing or replacing it clears the old decision and explanation from the new request. A new decision must be selected before submission. Owner withdrawal drafts follow the same request scope.
+
+During a return, external map navigation uses the pickup/return location as its destination, omits unfinished customer stops, and lets the navigation app choose the current origin. The itinerary shows completed historical stops and the return endpoint rather than presenting abandoned deliveries as upcoming work.
+
+An open exception does not prevent a replacement from accepting a rescue handover. Acceptance transfers responsibility but does not resolve the exception: pickup, intermediate cargo completion, delivery, and return completion remain held until a broker records a resolution.
+
+Failed delivery invalidates its previous route and ETA. Recipient tracking hides ETA during the failed state, automatic routing pauses, and manual ETA publication is blocked until redelivery or return is arranged. GPS sharing remains available so the broker can locate stranded cargo.
+
+Pickup starts delivery attempt 1. Broker-arranged redelivery starts a new attempt, clears arrival, and requires a fresh evidence upload for that attempt. Files from previous attempts or uploads made during a failed-delivery hold remain in history but cannot prove the new delivery. A reserved proof slot remains available for each new attempt even when earlier files filled the general allowance. Completion retains the attempt number alongside the proof reference.
+
+Migration preserves unambiguous first-attempt files. Legacy retry files whose attempt cannot be determined remain available in history but require fresh proof for an active delivery. Verified payout reversals remain available during legacy allocation review; further positive payouts wait for the corrected split. Reversal balance limits, account permissions, idempotency and invoice-version checks still apply.

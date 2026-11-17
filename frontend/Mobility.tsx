@@ -42,7 +42,11 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
     ['Awaiting quote', 'Quote ready', 'Ready to assign', 'Offered', 'Assigned'].includes(
       s.status,
     );
-  const next = s.stops?.find((stop) => !stop.completedAt);
+  const returning = ['Returning', 'Returned'].includes(s.status);
+  const visibleStops = returning
+    ? (s.stops || []).filter((stop) => stop.completedAt)
+    : s.stops || [];
+  const next = returning ? undefined : s.stops?.find((stop) => !stop.completedAt);
   const pickedUp = [
     'In transit',
     'Delivery failed',
@@ -50,12 +54,12 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
     'Returned',
     'Delivered',
   ].includes(s.status);
-  const finished = s.status === 'Delivered';
+  const finished = ['Delivered', 'Returned'].includes(s.status);
   const completed =
     (pickedUp ? 1 : 0) +
     (s.stops || []).filter((stop) => stop.completedAt).length +
     (finished ? 1 : 0);
-  const total = (s.stops?.length || 0) + 2;
+  const total = visibleStops.length + 2;
   const [calculating, setCalculating] = useState(false);
   async function calculate() {
     if (calculating) return;
@@ -99,7 +103,7 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
             </span>
           </div>
         </li>
-        {s.stops?.map((stop, index) => (
+        {visibleStops.map((stop, index) => (
           <li
             key={stop.id}
             data-state={
@@ -134,16 +138,24 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
             {finished ? '✓' : total}
           </span>
           <div>
-            <span className="stop-kind">DESTINATION · FINAL DELIVERY</span>
-            <strong>{s.destination}</strong>
+            <span className="stop-kind">
+              {returning ? 'RETURN · PICKUP LOCATION' : 'DESTINATION · FINAL DELIVERY'}
+            </span>
+            <strong>{returning ? s.returnDestination || s.pickup : s.destination}</strong>
             <span className="stop-detail">
-              {finished ? 'Delivery confirmed' : 'Recipient handoff'}
+              {returning
+                ? finished
+                  ? 'Return confirmed'
+                  : 'Return cargo to pickup'
+                : finished
+                  ? 'Delivery confirmed'
+                  : 'Recipient handoff'}
             </span>
           </div>
         </li>
       </ol>
       {error && <p role="alert">{error}</p>}
-      {route && (
+      {route && s.status !== 'Delivery failed' && (
         <div className="route-summary">
           <div>
             <span>Road distance</span>
@@ -182,6 +194,7 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
       )}
       <div className="journey-tools">
         {(user.role === 'admin' || s.driverId === user.id) &&
+          s.status !== 'Delivery failed' &&
           !['Delivered', 'Returned', 'Cancelled'].includes(s.status) && (
             <button
               className="btn light"
@@ -198,10 +211,10 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
           rel="noreferrer"
           href={`https://www.google.com/maps/dir/?${new URLSearchParams({
             api: '1',
-            origin: s.pickup,
-            destination: s.status === 'Returning' ? s.pickup : s.destination,
+            ...(returning ? {} : { origin: s.pickup }),
+            destination: returning ? s.returnDestination || s.pickup : s.destination,
             travelmode: 'driving',
-            waypoints: (s.stops || [])
+            waypoints: (returning ? [] : s.stops || [])
               .filter((p) => !p.completedAt)
               .map((p) => p.address)
               .join('|'),

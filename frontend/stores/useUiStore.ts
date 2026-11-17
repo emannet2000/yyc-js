@@ -16,8 +16,9 @@ interface UiState {
     action: Action,
     name: string,
     value: string,
+    scope?: string,
   ) => void;
-  clearActionDraft: (owner: string, id: string, action: Action) => void;
+  clearActionDraft: (owner: string, id: string, action: Action, scope?: string) => void;
   setDeliveryDraft: (owner: string, id: string, draft: EvidenceDraft) => void;
   syncDeliveryDrafts: (
     owner: string | null,
@@ -42,8 +43,8 @@ export const useUiStore = create<UiState>((set) => ({
   deliveryDrafts: {},
   actionDrafts: {},
 
-  setActionDraft(owner, id, action, name, value) {
-    const key = actionDraftKey(id, action);
+  setActionDraft(owner, id, action, name, value, scope) {
+    const key = actionDraftKey(id, action, scope);
     set((state) => {
       const existing = state.draftOwner === owner ? state.actionDrafts : {};
       return {
@@ -53,8 +54,8 @@ export const useUiStore = create<UiState>((set) => ({
       };
     });
   },
-  clearActionDraft(owner, id, action) {
-    const key = actionDraftKey(id, action);
+  clearActionDraft(owner, id, action, scope) {
+    const key = actionDraftKey(id, action, scope);
     set((state) => {
       if (state.draftOwner !== owner || !state.actionDrafts[key]) return state;
       const remaining = { ...state.actionDrafts };

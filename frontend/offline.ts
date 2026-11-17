@@ -66,11 +66,16 @@ export function projectAction(s: Shipment, entry: PendingAction): Shipment {
       else next.status = 'Ready to assign';
       next.offeredTo = null;
       break;
+    case 'attachEvidence':
+      next.evidenceCount = (next.evidenceCount || 0) + 1;
+      break;
     case 'arrival':
       next.arrivedAt = time;
       break;
     case 'pickup':
       next.status = 'In transit';
+      next.deliveryAttempt = 1;
+      next.evidenceCount = 0;
       delete next.arrivedAt;
       break;
     case 'deliver':

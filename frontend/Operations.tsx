@@ -913,12 +913,19 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
             Last shared: {new Date(value.recordedAt).toLocaleString()} · Accuracy ±
             {Math.round(value.accuracy || 0)} m
           </p>
+          <iframe
+            className="livemap-frame"
+            src={`https://www.openstreetmap.org/export/embed.html?bbox=${value.longitude! - 0.02},${value.latitude! - 0.015},${value.longitude! + 0.02},${value.latitude! + 0.015}&layer=mapnik&marker=${value.latitude},${value.longitude}`}
+            title="Last shared driver location"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+          />
           <a
             href={`https://www.openstreetmap.org/?mlat=${value.latitude}&mlon=${value.longitude}#map=15/${value.latitude}/${value.longitude}`}
             target="_blank"
             rel="noreferrer"
           >
-            View last shared location on map
+            Open in full map ↗
           </a>
         </>
       ) : (

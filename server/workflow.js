@@ -268,6 +268,11 @@ export function createWorkflow({ now, requireThat, text, positive, money }) {
         });
         delete s.quoteExpiresAt;
       } else if (cargoStates.includes(s.status)) {
+        requireThat(
+          !s.issue || s.issue.resolved,
+          409,
+          'Resolve the open delivery exception before approving a cancellation.',
+        );
         // Already returning: keep the broker's existing return instructions.
         if (s.status !== 'Returning') startCargoReturn(s, response);
       } else {

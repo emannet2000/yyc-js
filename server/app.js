@@ -326,18 +326,21 @@ export function createApplication({
       history: _history,
       ...data
     } = s;
-    db.prepare(
-      'UPDATE shipments SET driver_id=?,offered_to=?,status=?,version=?,data=?,updated_at=? WHERE id=? AND store_id=?',
-    ).run(
-      driverId,
-      offeredTo,
-      status,
-      version,
-      JSON.stringify(data),
-      new Date().toISOString(),
-      id,
-      storeId,
-    );
+    const result = db
+      .prepare(
+        'UPDATE shipments SET driver_id=?,offered_to=?,status=?,version=?,data=?,updated_at=? WHERE id=? AND store_id=?',
+      )
+      .run(
+        driverId,
+        offeredTo,
+        status,
+        version,
+        JSON.stringify(data),
+        new Date(now()).toISOString(),
+        id,
+        storeId,
+      );
+    if (result.changes !== 1) throw Object.assign(new Error('Shipment not found'), { status: 500 });
   }
   function scheduleInput(data) {
     const date = text(data, 'date'),
@@ -492,7 +495,7 @@ export function createApplication({
         JSON.stringify(profile),
         role === 'driver' ? 0 : 1,
         0,
-        new Date().toISOString(),
+        new Date(now()).toISOString(),
       );
       if (truck)
         db.prepare('INSERT INTO trucks VALUES (?,?,?,?,0)').run(
@@ -702,6 +705,7 @@ export function createApplication({
                   s.status,
                 ),
             );
+            text(data, 'reason');
             if (data.price === s.price) {
               message = workflow.changeRate(s, user, data);
               break;
@@ -726,6 +730,7 @@ export function createApplication({
             });
             delete s.handover;
             delete s.offerExpiresAt;
+            delete s.rateChange;
             s.quoteExpiresAt = now() + 48 * 3600000;
             delete s.arrivedAt;
             delete s.pickupArrivedAt;
@@ -779,6 +784,8 @@ export function createApplication({
             delete s.arrivedAt;
             delete s.pickupArrivedAt;
             delete s.handover;
+            delete s.offerExpiresAt;
+            delete s.quoteExpiresAt;
             message = `Shipment revised; quotation and assignment reset: ${reason}`;
             break;
           }
@@ -812,7 +819,7 @@ export function createApplication({
               resolvedAt: new Date(now()).toISOString(),
             });
       }
-      if (!s.arrivedAt) delete s.finalArrivalVersion;
+      if (!s.arrivedAt && prePickup.includes(s.status)) delete s.finalArrivalVersion;
       s.version++;
       persist(s);
       if (['Delivered', 'Returned', 'Cancelled'].includes(s.status)) {
@@ -820,13 +827,18 @@ export function createApplication({
           'UPDATE mobile_devices SET revoked_at=? WHERE shipment_id=? AND revoked_at IS NULL',
         ).run(now(), id);
         db.prepare('DELETE FROM mobile_pairings WHERE shipment_id=?').run(id);
-      } else {
+      } else if (s.driverId) {
         db.prepare(
-          'UPDATE mobile_devices SET revoked_at=? WHERE shipment_id=? AND user_id IS NOT ? AND revoked_at IS NULL',
+          'UPDATE mobile_devices SET revoked_at=? WHERE shipment_id=? AND user_id != ? AND revoked_at IS NULL',
         ).run(now(), id, s.driverId);
         db.prepare(
-          'DELETE FROM mobile_pairings WHERE shipment_id=? AND user_id IS NOT ?',
+          'DELETE FROM mobile_pairings WHERE shipment_id=? AND user_id != ?',
         ).run(id, s.driverId);
+      } else {
+        db.prepare(
+          'UPDATE mobile_devices SET revoked_at=? WHERE shipment_id=? AND revoked_at IS NULL',
+        ).run(now(), id);
+        db.prepare('DELETE FROM mobile_pairings WHERE shipment_id=?').run(id);
       }
       audit(s, user, message, previousRecipients);
       const result = { version: s.version };
@@ -1080,7 +1092,6 @@ export function createApplication({
                 'If this account is eligible, recovery instructions will be provided. Contact YYC if no message arrives.',
             });
           } else {
-            resetTarget(data.token);
             const hash = await passwordHash(password(data));
             transaction(db, () => {
               const target = resetTarget(data.token);
@@ -1288,6 +1299,13 @@ export function createApplication({
           user.id,
         );
         send(res, 200, { ok: true });
+        return;
+      }
+      if (path === '/api/accounts' && req.method === 'POST') {
+        requireThat(user.role === 'admin', 403, 'Broker access required.');
+        const result = await register(data, true);
+        accountEvent(user.id, result.id, `Broker account created by ${user.name}`);
+        send(res, 201, result);
         return;
       }
       const accountRoute = /^\/api\/accounts\/([^/]+)\/(status|password-reset)$/.exec(

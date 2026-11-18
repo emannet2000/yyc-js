@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setup, booking, action, registration, login } from './helpers/app.mjs';
+import {
+  setup,
+  booking,
+  action,
+  registration,
+  login,
+  attachDeliveryEvidence,
+} from './helpers/app.mjs';
 
 async function replacement(fixture, email = 'replacement@example.com') {
   const client = fixture.client();
@@ -241,6 +248,70 @@ test('quote-only corrections preserve cargo, archive prices, and require fresh a
     );
     await action(f.store, id, 'acceptQuote');
     assert.equal((await current(f.admin, id)).status, 'Ready to assign');
+  }
+});
+
+test('requote clears a pending rateChange so the stale proposal cannot resurface', async (t) => {
+  const f = await setup(t);
+  const id = await prepare(f, 'Offered');
+  await action(f.admin, id, 'changeRate', { rate: 325, reason: 'Proposed rate' });
+  const withRate = await current(f.admin, id);
+  assert.ok(withRate.rateChange, 'rateChange should exist before requote');
+  await action(f.admin, id, 'requote', {
+    price: 500,
+    rate: 350,
+    reason: 'Corrected price',
+  });
+  const after = await current(f.admin, id);
+  assert.equal(after.rateChange, undefined, 'rateChange must be cleared by requote');
+  assert.equal(after.price, 500);
+  assert.equal(after.driverId, null);
+});
+
+test('finalArrivalVersion survives redeliver so first-attempt evidence retains its scope', async (t) => {
+  const f = await setup(t);
+  const id = await prepare(f);
+  await action(f.driver, id, 'arrival');
+  await attachDeliveryEvidence(f.driver, id);
+  const arrived = await current(f.admin, id);
+  assert.ok(arrived.finalArrivalVersion, 'finalArrivalVersion must be set after evidence upload');
+  await action(f.driver, id, 'failDelivery', {
+    reason: 'Nobody home',
+    note: 'Left a card',
+  });
+  await action(f.admin, id, 'redeliver', {
+    date: '2099-11-06',
+    window: '09:00–12:00',
+    deliveryDeadline: '',
+    estimatedMinutes: 60,
+    travelBufferMinutes: 15,
+    reason: 'Customer confirmed second attempt',
+  });
+  const redelivering = await current(f.admin, id);
+  assert.equal(redelivering.arrivedAt, undefined, 'arrivedAt cleared by redeliver');
+  assert.ok(
+    redelivering.finalArrivalVersion,
+    'finalArrivalVersion must survive redeliver',
+  );
+});
+
+test('change clears stale quoteExpiresAt and offerExpiresAt so revised shipments carry no phantom expiry', async (t) => {
+  const f = await setup(t);
+  for (const status of ['Quote ready', 'Offered', 'Assigned']) {
+    const id = await prepare(f, status);
+    const before = await current(f.admin, id);
+    if (status === 'Quote ready') assert.ok(before.quoteExpiresAt, 'quoteExpiresAt present before change');
+    if (status === 'Offered') assert.ok(before.offerExpiresAt, 'offerExpiresAt present before change');
+    await action(f.admin, id, 'change', {
+      destination: 'Revised destination 2099',
+      kg: 900,
+      pallets: 4,
+      reason: 'Customer updated delivery address',
+    });
+    const after = await current(f.admin, id);
+    assert.equal(after.status, 'Awaiting quote');
+    assert.equal(after.quoteExpiresAt, undefined, 'quoteExpiresAt must be cleared by change');
+    assert.equal(after.offerExpiresAt, undefined, 'offerExpiresAt must be cleared by change');
   }
 });
 

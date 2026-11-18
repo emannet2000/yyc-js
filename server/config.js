@@ -4,7 +4,7 @@ export function startupConfig(env = process.env) {
   const production = env.NODE_ENV === 'production';
   const onRender = env.RENDER === 'true';
   const publicOrigin = env.PUBLIC_ORIGIN || (onRender && env.RENDER_EXTERNAL_URL);
-  const port = Number(env.PORT || 3000);
+  const port = Number(env.PORT || 6660);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error('PORT must be an integer between 1 and 65535.');
   if (env.COOKIE_SECURE && !['true', 'false'].includes(env.COOKIE_SECURE))

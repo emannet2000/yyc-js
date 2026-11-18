@@ -118,6 +118,72 @@
 }
 .mapcard {
   margin-top: 24px;
+  padding: 0;
+  overflow: hidden;
+}
+.livemap {
+  display: flex;
+  flex-direction: column;
+}
+.livemap-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--workspace-line);
+}
+.livemap-beacon {
+  font-size: 20px;
+  color: #0a7a6e;
+  flex-shrink: 0;
+  animation: livemap-pulse 2s ease-in-out infinite;
+}
+@keyframes livemap-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.livemap-header > div {
+  flex: 1;
+  min-width: 0;
+}
+.livemap-header strong {
+  display: block;
+  font-size: 13px;
+  color: var(--workspace-ink);
+}
+.livemap-status {
+  display: block;
+  font-size: 11px;
+  color: var(--workspace-muted);
+  margin-top: 3px;
+}
+.livemap-link {
+  font-size: 11px;
+  color: #2060a0;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.livemap-frame {
+  width: 100%;
+  height: 320px;
+  border: 0;
+  display: block;
+}
+.livemap-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  font-size: 10px;
+  color: var(--workspace-muted);
+  border-top: 1px solid var(--workspace-line);
+  background: #f9fafb;
+}
+.card .livemap-frame {
+  margin: 12px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  height: 260px;
 }
 .workboard {
   display: grid;
@@ -261,6 +327,50 @@ button:disabled {
 }
 .authright .error:empty {
   display: none;
+}
+.auth-setup-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 20px 0 24px;
+  padding: 16px 18px;
+  background: #fff8ed;
+  border: 1px solid #e8d4a8;
+  border-radius: 10px;
+}
+.auth-setup-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.auth-setup-notice > div {
+  flex: 1;
+  min-width: 0;
+}
+.auth-setup-notice strong {
+  display: block;
+  color: #7a5a1e;
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+.auth-setup-notice p {
+  color: #9a7030;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
+.auth-setup-notice .btn {
+  flex-shrink: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+@media (max-width: 650px) {
+  .auth-setup-notice {
+    flex-direction: column;
+  }
+  .auth-setup-notice .btn {
+    width: 100%;
+  }
 }
 /* Isolate the React shell from the legacy prototype's fixed sidebar layout. */
 .app {

@@ -22,7 +22,8 @@
     "backup:scheduled": "node server/maintenance-cli.js backup",
     "recovery:drill": "node server/maintenance-cli.js drill",
     "start:configured": "node --env-file=.env server/start.js",
-    "setup": "node server/setup.js"
+    "setup": "node server/setup.js",
+    "seed": "node scripts/seed.js"
   },
   "dependencies": {
     "react": "19.3.1",

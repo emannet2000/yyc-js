@@ -251,3 +251,21 @@ test('phone authorization survives restart, secrets are hashed, and restore revo
   await restored.stop();
   rmSync(directory, { recursive: true, force: true });
 });
+test('requote with null driverId revokes all paired phones, not just non-null-driver ones', async (t) => {
+  const f = await job(t),
+    p = await paired(f);
+  assert.equal(
+    (await p.guest('/api/mobile/status', 'GET', undefined, p.headers)).status,
+    200,
+  );
+  await action(f.admin, f.id, 'requote', {
+    price: 500,
+    rate: 350,
+    reason: 'Price correction after assignment',
+  });
+  assert.equal(
+    (await p.guest('/api/mobile/status', 'GET', undefined, p.headers)).status,
+    401,
+    'requote must revoke mobile device even when driverId becomes null',
+  );
+});

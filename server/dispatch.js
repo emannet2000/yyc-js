@@ -6,11 +6,12 @@ import {
 } from '../shared/scheduling.js';
 
 export function releaseDriverOffer(shipment) {
+  const prevOfferedTo = shipment.offeredTo;
   shipment.offeredTo = null;
   delete shipment.offerExpiresAt;
   delete shipment.handover;
   if (shipment.status === 'Offered') shipment.status = 'Ready to assign';
-  if (shipment.rateChange && shipment.rateChange.driverId !== shipment.driverId)
+  if (shipment.rateChange && ![shipment.driverId, prevOfferedTo].includes(shipment.rateChange.driverId))
     delete shipment.rateChange;
 }
 

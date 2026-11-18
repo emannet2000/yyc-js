@@ -5,6 +5,51 @@ import { Field } from './Field';
 import type { User } from './types';
 
 type Save = (work: () => Promise<unknown>, message: string) => Promise<void>;
+
+function AddBroker({ busy, save }: { busy: boolean; save: Save }) {
+  const [open, setOpen] = useState(false);
+  const [key, setKey] = useState(0);
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const payload: Record<string, unknown> = Object.fromEntries(data.entries());
+    if (payload.password !== payload.confirm)
+      return alert('Passwords must match.');
+    delete payload.confirm;
+    void save(async () => {
+      await api('/api/accounts', 'POST', payload);
+      setOpen(false);
+      setKey((k) => k + 1);
+    }, 'Broker account created.');
+  }
+  if (!open)
+    return (
+      <section className="card accountcard">
+        <h2>Add broker account</h2>
+        <p>Create an additional broker who can manage deliveries and approve drivers.</p>
+        <button className="btn" disabled={busy} onClick={() => setOpen(true)}>
+          + Add broker
+        </button>
+      </section>
+    );
+  return (
+    <section className="card accountcard">
+      <h2>New broker account</h2>
+      <form key={key} onSubmit={submit}>
+        <Field name="name" label="Full name" />
+        <Field name="phone" label="Contact phone" type="tel" />
+        <Field name="email" label="Email address" type="email" />
+        <Field name="password" label="Password" type="password" autoComplete="new-password" />
+        <Field name="confirm" label="Confirm password" type="password" autoComplete="new-password" />
+        <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+          <button className="btn" disabled={busy}>Create broker account</button>
+          <button className="btn light" type="button" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 export function Accounts({
   accounts,
   currentId,
@@ -18,6 +63,7 @@ export function Accounts({
 }) {
   return (
     <div className="grid2">
+      <AddBroker busy={busy} save={save} />
       {accounts.map((account) => (
         <Account
           key={account.id}

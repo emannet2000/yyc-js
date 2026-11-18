@@ -109,14 +109,109 @@ function Route({ shipment: s }: { shipment: Shipment }) {
     </div>
   );
 }
-function NoMap() {
+function LiveMap({
+  shipments,
+  selectedId,
+}: {
+  shipments: Shipment[];
+  selectedId: string | null;
+}) {
+  const [revision, setRevision] = useState(0);
+  const [tracking, setTracking] = useState<{
+    latitude?: number;
+    longitude?: number;
+    accuracy?: number;
+    recordedAt?: string;
+    eta?: string;
+    driverId?: string;
+  } | null>(null);
+
+  const activeShipments = shipments.filter(
+    (s) =>
+      s.driverId &&
+      ['Assigned', 'In transit', 'Delivery failed', 'Returning'].includes(s.status),
+  );
+  const target =
+    shipments.find((s) => s.id === selectedId && s.driverId) ??
+    activeShipments[0] ??
+    null;
+
+  useEffect(() => {
+    if (!target) {
+      setTracking(null);
+      return;
+    }
+    let cancelled = false;
+    void api<typeof tracking>(`/api/shipments/${target.id}/tracking`)
+      .then((v) => {
+        if (!cancelled) setTracking(v);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [target?.id, target?.version, revision]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setRevision((v) => v + 1), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const hasLocation =
+    tracking?.latitude != null &&
+    tracking?.longitude != null &&
+    tracking.driverId === target?.driverId;
+
+  if (!target || !hasLocation) {
+    return (
+      <div className="unconnectedmap">
+        <h2>Live delivery map</h2>
+        <p>
+          {activeShipments.length
+            ? 'Waiting for the assigned driver to share their GPS location.'
+            : 'Open a delivery to view its location, milestones, and ETA.'}
+        </p>
+      </div>
+    );
+  }
+
+  const lat = tracking!.latitude!;
+  const lon = tracking!.longitude!;
+  const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${lon - 0.02},${lat - 0.015},${lon + 0.02},${lat + 0.015}&layer=mapnik&marker=${lat},${lon}`;
+  const openUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=15/${lat}/${lon}`;
+
   return (
-    <div className="unconnectedmap">
-      <h2>Delivery tracking</h2>
-      <p>
-        Open a delivery to view its milestones, ETA, and last location shared by the
-        assigned driver.
-      </p>
+    <div className="livemap">
+      <div className="livemap-header">
+        <span className="livemap-beacon" aria-hidden="true">◎</span>
+        <div>
+          <strong>Live location · {target.id}</strong>
+          <span className="livemap-status">
+            {tracking!.recordedAt
+              ? `Last update: ${new Date(tracking!.recordedAt).toLocaleTimeString()}`
+              : 'Location active'}
+            {tracking!.eta && !['Delivered', 'Returned', 'Cancelled'].includes(target.status)
+              ? ` · ETA ${new Date(tracking!.eta).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+              : ''}
+          </span>
+        </div>
+        <a href={openUrl} target="_blank" rel="noreferrer" className="livemap-link">
+          Open full map ↗
+        </a>
+      </div>
+      <iframe
+        className="livemap-frame"
+        src={mapUrl}
+        title={`Live location for ${target.id}`}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+      />
+      <div className="livemap-footer">
+        <span>±{Math.round(tracking!.accuracy ?? 0)} m accuracy</span>
+        <span>
+          {target.pickup} → {target.destination}
+        </span>
+      </div>
     </div>
   );
 }
@@ -182,7 +277,11 @@ function Auth({
           liftgate: data.liftgate === 'on',
         });
         setRegister(false);
-        notify('Account created. Log in with your email and password.');
+        notify(
+          role === 'driver'
+            ? 'Driver account created. Log in and wait for broker approval before accepting jobs.'
+            : 'Account created. Log in with your email and password.',
+        );
       } else {
         const result = await api<{ csrf: string }>('/api/login', 'POST', data);
         setCsrf(result.csrf);
@@ -234,22 +333,25 @@ function Auth({
           <span>YYC WORKSPACE</span>
         </header>
         <div className="authbox">
-          {setupRequired && (
-            <section className="notice">
-              <h2>Workspace setup required</h2>
-              <p>
-                A broker account must be created before drivers can be approved and
-                deliveries dispatched.
-              </p>
-              <button className="btn light" onClick={() => setSetup(true)}>
-                Set up broker account
-              </button>
-            </section>
-          )}
           <h1>{register ? 'Create your YYC account.' : 'Log in to your workspace.'}</h1>
           <p className="muted">
             Store owners, drivers and brokers use their own email and password.
           </p>
+          {setupRequired && (
+            <section className="auth-setup-notice">
+              <div className="auth-setup-icon" aria-hidden="true">⚙</div>
+              <div>
+                <strong>Workspace setup required</strong>
+                <p>
+                  Create a broker account to start approving drivers and dispatching
+                  deliveries.
+                </p>
+              </div>
+              <button className="btn" onClick={() => setSetup(true)}>
+                Set up broker account
+              </button>
+            </section>
+          )}
           <div className="switch">
             <button
               disabled={busy}
@@ -1588,7 +1690,7 @@ function App() {
                 )}
                 {['dashboard', 'tracking'].includes(page) && (
                   <section className="card mapcard">
-                    <NoMap />
+                    <LiveMap shipments={shipments} selectedId={selected} />
                   </section>
                 )}
               </>

@@ -11,7 +11,6 @@ import { promisify } from 'node:util';
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { driverAvailable, canTakeCargo } from '../shared/scheduling.js';
 import { createLoginLimiter } from './login-limiter.js';
 import { createRegistrationLimiter } from './registration-limiter.js';
 import { isPositiveMoney } from '../shared/money.js';
@@ -19,12 +18,18 @@ import {
   prePickup,
   cargoStates,
   validDeadline,
-  deliveryAttempt,
+  edmontonDate,
+  pickupDatePassed,
 } from '../shared/planning.js';
 import { createOperations } from './operations.js';
 import { createMobility } from './mobility.js';
 import { createMobile } from './mobile.js';
-import { createWorkflow } from './workflow.js';
+import { applyCargoAction } from './cargo.js';
+import { applyDispatchAction, releaseDriverOffer } from './dispatch.js';
+import { applyDeliveryMilestone } from './delivery-milestones.js';
+import { currentDeliveryProof, deliveryProofCounts } from './delivery-evidence.js';
+import { clearTrackingEstimates } from './tracking-eta.js';
+import { archiveQuote, createWorkflow } from './workflow.js';
 
 const deriveKey = promisify(scrypt);
 const project = fileURLToPath(new URL('../', import.meta.url));
@@ -286,8 +291,10 @@ export function createApplication({
     return db
       .prepare(
         `SELECT id,status,driver_id AS driverId,offered_to AS offeredTo,
-      json_extract(data,'$.date') AS date,json_extract(data,'$.window') AS window,
-      json_extract(data,'$.estimatedMinutes') AS estimatedMinutes,json_extract(data,'$.travelBufferMinutes') AS travelBufferMinutes FROM shipments
+      COALESCE(json_extract(data,'$.redeliveryPlan.date'),json_extract(data,'$.date')) AS date,
+      COALESCE(json_extract(data,'$.redeliveryPlan.window'),json_extract(data,'$.window')) AS window,
+      COALESCE(json_extract(data,'$.redeliveryPlan.estimatedMinutes'),json_extract(data,'$.estimatedMinutes')) AS estimatedMinutes,
+      COALESCE(json_extract(data,'$.redeliveryPlan.travelBufferMinutes'),json_extract(data,'$.travelBufferMinutes')) AS travelBufferMinutes FROM shipments
       WHERE (driver_id=? OR offered_to=?) AND status IN ('Offered','Assigned','In transit','Delivery failed','Returning')`,
       )
       .all(driverId, driverId);
@@ -332,29 +339,11 @@ export function createApplication({
       storeId,
     );
   }
-  function suitable(s, driver) {
-    const t = driver?.truck;
-    return (
-      driver?.role === 'driver' &&
-      driver.approved &&
-      !driver.disabled &&
-      t?.approved &&
-      t.type === s.type &&
-      t.kg >= s.kg &&
-      t.pallets >= s.pallets &&
-      (!s.unloading.includes('Liftgate') || t.liftgate)
-    );
-  }
   function scheduleInput(data) {
     const date = text(data, 'date'),
       window = choice(data, 'window', windows),
       deliveryDeadline = text(data, 'deliveryDeadline', true);
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Edmonton',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date(now()));
+    const today = edmontonDate(now());
     requireThat(
       /^\d{4}-\d{2}-\d{2}$/.test(date) &&
         Number.isFinite(Date.parse(date)) &&
@@ -406,12 +395,7 @@ export function createApplication({
       400,
       'Pickup date is invalid.',
     );
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Edmonton',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date());
+    const today = edmontonDate(now());
     requireThat(result.date >= today, 400, 'Choose today or a future pickup date.');
     requireThat(
       result.pickup.toLowerCase() !== result.destination.toLowerCase(),
@@ -593,8 +577,14 @@ export function createApplication({
           .prepare('SELECT * FROM action_requests WHERE user_id=? AND request_key=?')
           .get(user.id, data.requestKey);
         if (previous) {
+          const { queuedAt, ...legacyData } = data;
+          const legacyRetry =
+            queuedAt !== undefined &&
+            ['arrival', 'pickup'].includes(data.action) &&
+            previous.request_hash === sha256(JSON.stringify(legacyData));
           requireThat(
-            previous.shipment_id === id && previous.request_hash === requestHash,
+            previous.shipment_id === id &&
+              (previous.request_hash === requestHash || legacyRetry),
             409,
             'Action request key was used with different details.',
           );
@@ -609,10 +599,10 @@ export function createApplication({
         'Delivery changed. Refresh and review before trying again.',
       );
       const previousRecipients = [s.driverId, s.offeredTo];
+      const previousDriverId = s.driverId;
       const admin = user.role === 'admin',
         owner = user.role === 'store' && s.storeId === user.id;
       const assigned = user.role === 'driver' && s.driverId === user.id;
-      const offered = user.role === 'driver' && s.offeredTo === user.id;
       const active = ['Assigned', ...cargoStates].includes(s.status);
       const allowed = (condition) =>
         requireThat(
@@ -620,10 +610,47 @@ export function createApplication({
           403,
           'This action is not available for this account and delivery state.',
         );
+      const requireCurrentPickupDate = (time = now()) =>
+        requireThat(
+          !pickupDatePassed(s, time),
+          409,
+          'The pickup date has passed. Ask the broker to reschedule the delivery.',
+        );
       let message;
-      const stopMessage =
-        workflow.apply(s, user, data) || mobility.stopAction(s, user, data);
-      if (stopMessage) message = stopMessage;
+      const workflowMessage =
+        workflow.apply(s, user, data) ||
+        applyDispatchAction(s, user, data, {
+          allowed,
+          requireThat,
+          text,
+          now,
+          requireCurrentPickupDate,
+          commitments,
+          cargoCommitments,
+          findDriver: (id) =>
+            account(db.prepare('SELECT * FROM users WHERE id=?').get(id)),
+        }) ||
+        applyCargoAction(s, user, data, {
+          allowed,
+          requireThat,
+          text,
+          now,
+          scheduleInput,
+          commitments,
+          driverCanAct: (id) =>
+            !!db.prepare('SELECT 1 FROM users WHERE id=? AND disabled=0').get(id),
+        }) ||
+        applyDeliveryMilestone(s, user, data, {
+          allowed,
+          requireThat,
+          text,
+          now,
+          requireCurrentPickupDate,
+          cargoCommitments,
+          findProof: (shipment) => currentDeliveryProof(db, shipment),
+        }) ||
+        mobility.stopAction(s, user, data);
+      if (workflowMessage) message = workflowMessage;
       else
         switch (data.action) {
           case 'reschedule': {
@@ -639,20 +666,7 @@ export function createApplication({
               400,
               'Change a schedule value first.',
             );
-            s.quoteArchive = [
-              ...(s.quoteArchive || []),
-              {
-                version: s.quoteVersion,
-                price: s.price,
-                rate: s.rate,
-                destination: s.destination,
-                kg: s.kg,
-                pallets: s.pallets,
-                date: s.date,
-                window: s.window,
-                reason,
-              },
-            ];
+            archiveQuote(s, reason);
             Object.assign(s, plan, {
               quoteVersion: s.quoteVersion + 1,
               driverId: null,
@@ -667,75 +681,9 @@ export function createApplication({
             message = `Schedule revised; acceptance and assignment reset: ${reason}`;
             break;
           }
-          case 'failDelivery':
-            allowed(assigned && s.status === 'In transit');
-            s.failedAttempts = [
-              ...(s.failedAttempts || []),
-              {
-                reason: text(data, 'reason'),
-                note: text(data, 'note'),
-                time: new Date(now()).toISOString(),
-                driverId: user.id,
-                arrivedAt: s.arrivedAt || null,
-              },
-            ];
-            s.status = 'Delivery failed';
-            s.offeredTo = null;
-            delete s.handover;
-            delete s.offerExpiresAt;
-            delete s.arrivedAt;
-            message = `Delivery attempt failed: ${s.failedAttempts.at(-1).reason}`;
-            break;
-          case 'redeliver': {
-            allowed(admin && s.status === 'Delivery failed');
-            requireThat(
-              !s.issue || s.issue.resolved,
-              409,
-              'Resolve the open issue before redelivery.',
-            );
-            const plan = scheduleInput(data);
-            const reason = text(data, 'reason');
-            requireThat(
-              driverAvailable({ ...s, ...plan }, commitments(s.driverId), s.driverId),
-              409,
-              'The driver has another reservation during redelivery.',
-            );
-            s.deliveryAttempt = (s.deliveryAttempt || s.failedAttempts?.length || 1) + 1;
-            Object.assign(s, plan, { status: 'In transit', offeredTo: null });
-            delete s.handover;
-            delete s.offerExpiresAt;
-            delete s.arrivedAt;
-            message = `Redelivery arranged: ${reason}`;
-            break;
-          }
-          case 'return':
-            allowed(admin && ['In transit', 'Delivery failed'].includes(s.status));
-            s.returnReason = text(data, 'reason');
-            s.returnDestination = s.pickup;
-            s.status = 'Returning';
-            s.offeredTo = null;
-            delete s.handover;
-            delete s.offerExpiresAt;
-            delete s.arrivedAt;
-            message = `Return to pickup arranged: ${s.returnReason}`;
-            break;
-          case 'confirmReturn':
-            allowed(assigned && s.status === 'Returning');
-            requireThat(
-              !s.issue || s.issue.resolved,
-              409,
-              'Resolve the open issue before completing the return.',
-            );
-            s.returnPod = text(data, 'pod');
-            s.returnRecipient = text(data, 'recipient');
-            s.status = 'Returned';
-            s.offeredTo = null;
-            delete s.handover;
-            delete s.offerExpiresAt;
-            message = 'Cargo return confirmed';
-            break;
           case 'quote':
             allowed(admin && s.status === 'Awaiting quote');
+            requireCurrentPickupDate();
             s.price = money(data, 'price');
             s.rate = money(data, 'rate');
             requireThat(
@@ -767,18 +715,7 @@ export function createApplication({
               400,
               'Change a quote amount before issuing a correction.',
             );
-            s.quoteArchive = [
-              ...(s.quoteArchive || []),
-              {
-                version: s.quoteVersion,
-                price: s.price,
-                rate: s.rate,
-                destination: s.destination,
-                kg: s.kg,
-                pallets: s.pallets,
-                reason,
-              },
-            ];
+            archiveQuote(s, reason);
             Object.assign(s, {
               price,
               rate,
@@ -793,216 +730,6 @@ export function createApplication({
             delete s.arrivedAt;
             delete s.pickupArrivedAt;
             message = `Quotation corrected to v${s.quoteVersion}; acceptance and assignment reset: ${reason}`;
-            break;
-          }
-          case 'handover': {
-            allowed(admin && active && !!s.driverId);
-            requireThat(
-              !s.handover && !s.offeredTo,
-              409,
-              'Withdraw the pending handover before offering another driver.',
-            );
-            const replacementId = text(data, 'driverId'),
-              reason = text(data, 'reason');
-            requireThat(
-              replacementId !== s.driverId,
-              400,
-              'Choose a different replacement driver.',
-            );
-            const replacement = account(
-              db.prepare('SELECT * FROM users WHERE id=?').get(replacementId),
-            );
-            requireThat(
-              suitable(s, replacement),
-              400,
-              'Replacement driver and truck must be approved and suitable.',
-            );
-            requireThat(
-              driverAvailable(s, commitments(replacementId, s.date), replacementId),
-              409,
-              'Replacement driver already has a commitment in this pickup window.',
-            );
-            requireThat(
-              !cargoStates.includes(s.status) ||
-                canTakeCargo(s.id, cargoCommitments(replacementId), replacementId),
-              409,
-              'Replacement driver must finish the current live load or pending cargo handover first.',
-            );
-            s.offeredTo = replacementId;
-            s.offerExpiresAt = now() + 3600000;
-            s.handover = {
-              fromDriverId: s.driverId,
-              reason,
-              offeredAt: new Date().toISOString(),
-            };
-            message = `Driver handover offered to ${replacement.name}: ${reason}`;
-            break;
-          }
-          case 'withdrawHandover':
-            allowed(admin && active && !!s.handover && !!s.offeredTo);
-            message = `Driver handover withdrawn: ${text(data, 'reason')}`;
-            s.offeredTo = null;
-            delete s.offerExpiresAt;
-            delete s.handover;
-            break;
-          case 'acceptQuote':
-            allowed(owner && s.status === 'Quote ready');
-            s.status = 'Ready to assign';
-            delete s.quoteExpiresAt;
-            message = 'Quotation accepted';
-            break;
-          case 'offer': {
-            allowed(admin && s.status === 'Ready to assign');
-            const driver = account(
-              db.prepare('SELECT * FROM users WHERE id=?').get(text(data, 'driverId')),
-            );
-            requireThat(
-              suitable(s, driver),
-              400,
-              'Driver and truck must be approved and suitable.',
-            );
-            requireThat(
-              driverAvailable(s, commitments(driver.id, s.date), driver.id),
-              409,
-              'Driver already has a commitment in this pickup window.',
-            );
-            s.offeredTo = driver.id;
-            s.offerExpiresAt = now() + 3600000;
-            s.status = 'Offered';
-            message = 'Job offered';
-            break;
-          }
-          case 'acceptJob':
-            allowed(offered && (s.status === 'Offered' || (active && !!s.handover)));
-            requireThat(
-              suitable(s, user),
-              403,
-              'Driver and truck approval or suitability is missing.',
-            );
-            requireThat(
-              driverAvailable(s, commitments(user.id, s.date), user.id),
-              409,
-              'You already have a commitment in this pickup window.',
-            );
-            requireThat(
-              !s.handover ||
-                !cargoStates.includes(s.status) ||
-                canTakeCargo(s.id, cargoCommitments(user.id), user.id),
-              409,
-              'Finish the current live load or pending cargo handover before accepting another load.',
-            );
-            if (s.handover) {
-              const previousDriver = db
-                .prepare('SELECT name FROM users WHERE id=?')
-                .get(s.driverId);
-              s.handoverHistory = [
-                ...(s.handoverHistory || []),
-                {
-                  ...s.handover,
-                  toDriverId: user.id,
-                  acceptedAt: new Date().toISOString(),
-                  status: s.status,
-                },
-              ];
-              message = `Driver accepted handover from ${previousDriver?.name || s.driverId}: ${s.handover.reason}`;
-              delete s.handover;
-              delete s.arrivedAt;
-            } else {
-              s.status = 'Assigned';
-              message = 'Job accepted';
-            }
-            s.driverId = user.id;
-            s.offeredTo = null;
-            delete s.offerExpiresAt;
-            break;
-          case 'decline':
-            allowed(offered && (s.status === 'Offered' || (active && !!s.handover)));
-            s.offeredTo = null;
-            delete s.offerExpiresAt;
-            if (s.handover) {
-              delete s.handover;
-              message = 'Driver handover declined; current assignment retained';
-            } else {
-              s.status = 'Ready to assign';
-              message = 'Job offer declined';
-            }
-            break;
-          case 'arrival':
-            allowed(assigned && active);
-            requireThat(!s.arrivedAt, 409, 'Arrival is already recorded for this leg.');
-            s.arrivedAt = new Date().toISOString();
-            message = `Arrival recorded at ${
-              s.status === 'Assigned'
-                ? 'pickup'
-                : s.status === 'Returning'
-                  ? 'return pickup'
-                  : 'delivery'
-            }`;
-            break;
-          case 'pickup':
-            allowed(assigned && s.status === 'Assigned' && suitable(s, user));
-            requireThat(
-              !s.issue || s.issue.resolved,
-              409,
-              'Resolve the open issue before collecting the load.',
-            );
-            requireThat(
-              canTakeCargo(s.id, cargoCommitments(user.id), user.id),
-              409,
-              'Finish the current live load or pending cargo handover before collecting another load.',
-            );
-            s.pickupArrivedAt = s.arrivedAt || null;
-            delete s.arrivedAt;
-            s.status = 'In transit';
-            s.pickupAt = new Date(now()).toISOString();
-            s.pickupVersion = s.version + 1;
-            s.deliveryAttempt = 1;
-            s.pickupDriverId = user.id;
-            message = 'Pickup confirmed';
-            break;
-          case 'deliver': {
-            allowed(assigned && s.status === 'In transit');
-            requireThat(
-              !(s.stops || []).some((stop) => !stop.completedAt),
-              409,
-              'Complete every intermediate stop before final delivery.',
-            );
-            requireThat(
-              !s.issue || s.issue.resolved,
-              409,
-              'Resolve the open issue before completing delivery.',
-            );
-            requireThat(
-              s.arrivedAt,
-              409,
-              'Record arrival at the final destination before confirming delivery.',
-            );
-            const evidence = db
-              .prepare(
-                'SELECT id,sha256 FROM evidence WHERE shipment_id=? AND pickup_version=? AND delivery_attempt=? ORDER BY created_at DESC,id DESC LIMIT 1',
-              )
-              .get(s.id, s.pickupVersion || 0, deliveryAttempt(s));
-            requireThat(
-              evidence,
-              409,
-              'Attach a delivery photo, signature image, or receipt document for this delivery attempt before confirming delivery.',
-            );
-            s.deliveryEvidence = {
-              fileId: evidence.id,
-              sha256: evidence.sha256,
-              arrivedAt: s.arrivedAt,
-              confirmedAt: new Date(now()).toISOString(),
-              driverId: user.id,
-              policy: 'arrival-and-file',
-              attempt: deliveryAttempt(s),
-            };
-            s.pod = text(data, 'pod');
-            s.recipient = text(data, 'recipient');
-            s.status = 'Delivered';
-            s.offeredTo = null;
-            delete s.offerExpiresAt;
-            delete s.handover;
-            message = 'Delivery confirmed';
             break;
           }
           case 'issue':
@@ -1037,18 +764,7 @@ export function createApplication({
               400,
               'Pickup and destination must differ.',
             );
-            s.quoteArchive = [
-              ...(s.quoteArchive || []),
-              {
-                version: s.quoteVersion,
-                price: s.price,
-                rate: s.rate,
-                destination: s.destination,
-                kg: s.kg,
-                pallets: s.pallets,
-                reason,
-              },
-            ];
+            archiveQuote(s, reason);
             Object.assign(s, {
               destination,
               kg,
@@ -1096,6 +812,7 @@ export function createApplication({
               resolvedAt: new Date(now()).toISOString(),
             });
       }
+      if (!s.arrivedAt) delete s.finalArrivalVersion;
       s.version++;
       persist(s);
       if (['Delivered', 'Returned', 'Cancelled'].includes(s.status)) {
@@ -1122,7 +839,9 @@ export function createApplication({
           JSON.stringify(result),
         );
       // Progress changes invalidate old route/ETA so recipients never see an old leg.
-      if (
+      if (previousDriverId !== s.driverId) {
+        db.prepare('DELETE FROM tracking WHERE shipment_id=?').run(id);
+      } else if (
         [
           'pickup',
           'failDelivery',
@@ -1134,17 +853,14 @@ export function createApplication({
           'cancel',
           'change',
           'reschedule',
-          'handover',
           'acceptJob',
-          'respondRequest',
-        ].includes(data.action)
+        ].includes(data.action) ||
+        (data.action === 'respondRequest' && text(data, 'decision') === 'approve')
       ) {
         const row = db.prepare('SELECT data FROM tracking WHERE shipment_id=?').get(id);
         if (row) {
           const t = JSON.parse(row.data);
-          delete t.route;
-          delete t.eta;
-          delete t.etaUpdatedAt;
+          clearTrackingEstimates(t);
           db.prepare('UPDATE tracking SET data=? WHERE shipment_id=?').run(
             JSON.stringify(t),
             id,
@@ -1474,7 +1190,18 @@ export function createApplication({
         return;
       }
       if (path === '/api/state' && req.method === 'GET') {
+        const invoiced =
+          user.role === 'admin'
+            ? new Set(
+                db
+                  .prepare('SELECT shipment_id FROM invoices')
+                  .all()
+                  .map((r) => r.shipment_id),
+              )
+            : null;
         const list = shipments(user).map((s) => {
+          if (invoiced && ['Delivered', 'Returned'].includes(s.status))
+            s.invoiceIssued = invoiced.has(s.id);
           if (user.role === 'store') {
             delete s.rate;
             delete s.rateHistory;
@@ -1484,18 +1211,13 @@ export function createApplication({
           }
           if (user.role === 'driver') {
             delete s.price;
-            s.quoteArchive = s.quoteArchive?.map(({ price: _price, ...quote }) => quote);
+            s.quoteArchive = s.quoteArchive?.map(
+              ({ price: _price, pickup: _pickup, stops: _stops, ...quote }) => quote,
+            );
           }
           return s;
         });
-        const evidenceCounts = new Map(
-          db
-            .prepare(
-              "SELECT e.shipment_id,COUNT(*) AS n FROM evidence e JOIN shipments s ON s.id=e.shipment_id WHERE (s.store_id=? OR s.driver_id=? OR s.offered_to=? OR ?='admin') AND e.pickup_version=COALESCE(json_extract(s.data,'$.pickupVersion'),0) AND e.delivery_attempt=COALESCE(json_extract(s.data,'$.deliveryAttempt'),json_array_length(COALESCE(json_extract(s.data,'$.failedAttempts'),'[]'))+1) GROUP BY e.shipment_id",
-            )
-            .all(user.id, user.id, user.id, user.role)
-            .map((r) => [r.shipment_id, r.n]),
-        );
+        const evidenceCounts = deliveryProofCounts(db, user);
         for (const s of list) s.evidenceCount = evidenceCounts.get(s.id) || 0;
         send(res, 200, {
           csrf: current.csrf,
@@ -1618,16 +1340,14 @@ export function createApplication({
                 (s) =>
                   s.offeredTo === targetId && (s.status === 'Offered' || !!s.handover),
               )) {
-                s.offeredTo = null;
-                delete s.offerExpiresAt;
-                if (s.handover) delete s.handover;
-                else s.status = 'Ready to assign';
+                releaseDriverOffer(s);
                 s.version++;
                 persist(s);
                 audit(
                   s,
                   user,
                   `Job offer withdrawn because the driver account was disabled: ${reason}`,
+                  [targetId],
                 );
               }
             }

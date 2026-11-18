@@ -22,16 +22,19 @@ test('driver records pickup and delivery offline then reconnects and replays in 
     value: false,
   });
   ui.window.dispatchEvent(new ui.window.Event('offline'));
+  assert.equal(ui.button('Confirm pickup').disabled, true);
+  ui.button('Record arrival').click();
+  await ui.wait(() => !ui.button('Confirm pickup').disabled);
   ui.button('Confirm pickup').click();
   await ui.wait(() =>
-    ui.doc.body.textContent.includes('1 action(s) awaiting server confirmation'),
+    ui.doc.body.textContent.includes('2 action(s) awaiting server confirmation'),
   );
   await ui.wait(() => ui.doc.querySelector('input[name="pod"]'));
   await ui.input('pod', 'OFFLINE-POD');
   await ui.input('recipient', 'Receiver');
   ui.button('Record arrival').click();
   await ui.wait(() =>
-    ui.doc.body.textContent.includes('2 action(s) awaiting server confirmation'),
+    ui.doc.body.textContent.includes('3 action(s) awaiting server confirmation'),
   );
   const fileInput = ui.doc.querySelector('input[name="file"]');
   Object.defineProperty(fileInput, 'files', {
@@ -53,11 +56,11 @@ test('driver records pickup and delivery offline then reconnects and replays in 
     .closest('form')
     .dispatchEvent(new ui.window.Event('submit', { bubbles: true, cancelable: true }));
   await ui.wait(() =>
-    ui.doc.body.textContent.includes('3 action(s) awaiting server confirmation'),
+    ui.doc.body.textContent.includes('4 action(s) awaiting server confirmation'),
   );
   ui.button('Confirm delivery').click();
   await ui.wait(() =>
-    ui.doc.body.textContent.includes('4 action(s) awaiting server confirmation'),
+    ui.doc.body.textContent.includes('5 action(s) awaiting server confirmation'),
   );
   assert.equal((await state(f)).status, 'Assigned');
   const queued = JSON.parse(
@@ -65,7 +68,7 @@ test('driver records pickup and delivery offline then reconnects and replays in 
   );
   assert.deepEqual(
     queued.map((e) => e.action),
-    ['pickup', 'arrival', 'attachEvidence', 'deliver'],
+    ['arrival', 'pickup', 'arrival', 'attachEvidence', 'deliver'],
   );
   assert.equal(queued[1].version, queued[0].version + 1);
   Object.defineProperty(ui.window.navigator, 'onLine', {
@@ -78,13 +81,16 @@ test('driver records pickup and delivery offline then reconnects and replays in 
   );
   const final = await state(f);
   assert.equal(final.status, 'Delivered');
+  assert.equal(final.pickupArrivedAt, queued[0].queuedAt);
+  assert.equal(final.pickupAt, queued[1].queuedAt);
   assert.equal(final.pod, 'OFFLINE-POD');
   assert.equal(final.history.filter((e) => e.text === 'Pickup confirmed').length, 1);
   assert.equal(final.history.filter((e) => e.text === 'Delivery confirmed').length, 1);
 });
 test('lost action response keeps retry key and replay does not duplicate pickup', async (t) => {
-  const f = await assigned(t),
-    ui = await renderApp(t, f.driver);
+  const f = await assigned(t);
+  await action(f.driver, f.id, 'arrival');
+  const ui = await renderApp(t, f.driver);
   await ui.drawer();
   const fetch = ui.window.fetch;
   let lost = false;
@@ -155,8 +161,9 @@ test('recipient view opens without login and removes bearer token from address b
 });
 
 test('offline sync stops on stale assignment instead of overwriting broker revisions', async (t) => {
-  const f = await assigned(t),
-    ui = await renderApp(t, f.driver);
+  const f = await assigned(t);
+  await action(f.driver, f.id, 'arrival');
+  const ui = await renderApp(t, f.driver);
   await ui.drawer();
   Object.defineProperty(ui.window.navigator, 'onLine', {
     configurable: true,
@@ -179,7 +186,9 @@ test('offline sync stops on stale assignment instead of overwriting broker revis
     value: true,
   });
   ui.window.dispatchEvent(new ui.window.Event('online'));
-  await ui.wait(() => ui.doc.body.textContent.includes('Sync stopped.'));
+  await ui.wait(() =>
+    ui.doc.body.textContent.includes(`Review saved actions for ${f.id}`),
+  );
   assert.deepEqual(await state(f), before);
   assert.equal(
     JSON.parse(ui.window.localStorage.getItem(`yyc-offline-actions:${f.driverId}`))
@@ -204,4 +213,121 @@ test('assigned driver creates a native phone pairing code from the delivery draw
     (await guest('/api/mobile/status', 'GET', undefined, headers)).status,
     200,
   );
+});
+
+test('offline conflict holds only the affected delivery and its later actions', async (t) => {
+  const f = await assigned(t);
+  const other = (await f.store('/api/shipments', 'POST', booking('13:00–16:00'))).value
+    .id;
+  await action(f.admin, other, 'quote', { price: 450, rate: 300 });
+  await action(f.store, other, 'acceptQuote');
+  await action(f.admin, other, 'offer', { driverId: f.driverId });
+  await action(f.driver, other, 'acceptJob');
+  const shipments = (await f.driver('/api/state')).value.shipments;
+  const version = (id) => shipments.find((s) => s.id === id).version;
+  const queuedAt = new Date().toISOString();
+  const queued = [
+    { id: f.id, version: version(f.id), action: 'arrival' },
+    { id: f.id, version: version(f.id) + 1, action: 'pickup' },
+    { id: other, version: version(other), action: 'arrival' },
+  ].map((entry, index) => ({
+    ...entry,
+    requestKey: `separate-delivery-action-${index}`,
+    data: {},
+    queuedAt,
+  }));
+  await action(f.admin, f.id, 'cancel');
+  const storageKey = `yyc-offline-actions:${f.driverId}`;
+  const replayed = [];
+  const ui = await renderApp(t, f.driver, {
+    beforeRender(window) {
+      window.localStorage.setItem(storageKey, JSON.stringify(queued));
+      const fetch = window.fetch;
+      window.fetch = (path, options) => {
+        if (path.endsWith('/actions')) replayed.push(JSON.parse(options.body).requestKey);
+        return fetch(path, options);
+      };
+    },
+  });
+  await ui.wait(() =>
+    ui.doc.body.textContent.includes(`Review saved actions for ${f.id}`),
+  );
+  assert.deepEqual(replayed, [queued[0].requestKey, queued[2].requestKey]);
+  assert.deepEqual(
+    JSON.parse(ui.window.localStorage.getItem(storageKey)),
+    queued.slice(0, 2),
+  );
+  const saved = (await f.admin('/api/state')).value.shipments.find((s) => s.id === other);
+  assert.equal(saved.arrivedAt, queuedAt);
+});
+
+test('each intermediate stop opens a blank receipt form', async (t) => {
+  const f = await assigned(t);
+  await action(f.admin, f.id, 'setStops', {
+    reason: 'Two stops',
+    stops: [
+      { kind: 'dropoff', address: 'First receiving dock' },
+      { kind: 'dropoff', address: 'Second receiving dock' },
+    ],
+  });
+  await action(f.admin, f.id, 'quote', { price: 450, rate: 300 });
+  await action(f.store, f.id, 'acceptQuote');
+  await action(f.admin, f.id, 'offer', { driverId: f.driverId });
+  await action(f.driver, f.id, 'acceptJob');
+  await action(f.driver, f.id, 'pickup');
+  const ui = await renderApp(t, f.driver);
+  await ui.drawer();
+  await ui.input('pod', 'FIRST-RECEIPT');
+  await ui.input('recipient', 'First receiver');
+  ui.button('Confirm stop').click();
+  await ui.wait(() =>
+    ui.doc.body.textContent.includes('Complete next stop: Second receiving dock'),
+  );
+  assert.equal(ui.doc.querySelector('input[name="pod"]').value, '');
+  assert.equal(ui.doc.querySelector('input[name="recipient"]').value, '');
+});
+
+test('stop edits survive unrelated refreshes and wait for review of a concurrent stop change', async (t) => {
+  const f = await assigned(t);
+  const setStops = (address) =>
+    action(f.admin, f.id, 'setStops', {
+      stops: [{ kind: 'dropoff', address }],
+      reason: 'Update receiving dock',
+    });
+  await setStops('Original receiving dock');
+  await action(f.admin, f.id, 'quote', { price: 450, rate: 300 });
+  const ui = await renderApp(t, f.admin);
+  await ui.drawer();
+  ui.detail('Edit intermediate stops');
+  const field = ui.doc.querySelector('.stop-editor input');
+  Object.getOwnPropertyDescriptor(ui.window.HTMLInputElement.prototype, 'value').set.call(
+    field,
+    'Unsaved receiving dock',
+  );
+  field.dispatchEvent(new ui.window.Event('input', { bubbles: true }));
+  const address = () => ui.doc.querySelector('.stop-editor input').value;
+  await action(f.store, f.id, 'acceptQuote');
+  ui.button('Refresh').click();
+  await ui.wait(() =>
+    ui.doc.querySelector('.toast')?.textContent.includes('Workspace refreshed'),
+  );
+  assert.equal(address(), 'Unsaved receiving dock');
+  assert.equal(ui.button('Save stops').disabled, false);
+
+  await setStops('Different saved receiving dock');
+  ui.button('Refresh').click();
+  await ui.wait(() => ui.button('Keep my edits'));
+  assert.equal(address(), 'Unsaved receiving dock');
+  assert.equal(ui.button('Save stops').disabled, true);
+  ui.button('Keep my edits').click();
+  await ui.wait(() => !ui.button('Save stops').disabled);
+  assert.equal(address(), 'Unsaved receiving dock');
+  const reason = ui.doc.querySelector('.stop-editor').closest('form').elements.reason;
+  reason.value = 'Reviewed the latest itinerary';
+  ui.button('Save stops').click();
+  await ui.wait(
+    () => ui.doc.querySelector('.toast')?.textContent === 'Delivery updated.',
+  );
+  assert.equal((await state(f)).stops[0].address, 'Unsaved receiving dock');
+  assert.equal(reason.value, '');
 });

@@ -1,22 +1,32 @@
 import { randomUUID } from 'node:crypto';
 import { prePickup, cargoStates } from '../shared/planning.js';
+import { startCargoReturn } from './cargo.js';
+
+export function archiveQuote(s, reason) {
+  s.quoteArchive = [
+    ...(s.quoteArchive || []),
+    {
+      version: s.quoteVersion,
+      price: s.price,
+      rate: s.rate,
+      pickup: s.pickup,
+      destination: s.destination,
+      stops: (s.stops || []).map(({ kind, address, contact }) => ({
+        kind,
+        address,
+        contact,
+      })),
+      date: s.date,
+      window: s.window,
+      kg: s.kg,
+      pallets: s.pallets,
+      reason,
+    },
+  ];
+}
 
 export function createWorkflow({ now, requireThat, text, positive, money }) {
   const terminal = (s) => ['Delivered', 'Returned', 'Cancelled'].includes(s.status);
-  function archive(s, reason) {
-    s.quoteArchive = [
-      ...(s.quoteArchive || []),
-      {
-        version: s.quoteVersion,
-        price: s.price,
-        rate: s.rate,
-        destination: s.destination,
-        kg: s.kg,
-        pallets: s.pallets,
-        reason,
-      },
-    ];
-  }
   function clearAssignment(s) {
     s.driverId = null;
     s.offeredTo = null;
@@ -238,7 +248,7 @@ export function createWorkflow({ now, requireThat, text, positive, money }) {
           400,
           'Enter a changed customer price and a driver rate no higher than that price.',
         );
-        archive(s, response);
+        archiveQuote(s, response);
         clearAssignment(s);
         Object.assign(s, {
           price,
@@ -248,7 +258,7 @@ export function createWorkflow({ now, requireThat, text, positive, money }) {
           quoteExpiresAt: now() + 48 * 3600000,
         });
       } else if (request.kind === 'shipment') {
-        archive(s, response);
+        archiveQuote(s, response);
         clearAssignment(s);
         Object.assign(s, request.proposal, {
           price: null,
@@ -259,16 +269,7 @@ export function createWorkflow({ now, requireThat, text, positive, money }) {
         delete s.quoteExpiresAt;
       } else if (cargoStates.includes(s.status)) {
         // Already returning: keep the broker's existing return instructions.
-        if (s.status !== 'Returning') {
-          Object.assign(s, {
-            status: 'Returning',
-            returnDestination: s.pickup,
-            returnReason: response,
-            offeredTo: null,
-          });
-          for (const key of ['handover', 'offerExpiresAt', 'arrivedAt', 'rateChange'])
-            delete s[key];
-        }
+        if (s.status !== 'Returning') startCargoReturn(s, response);
       } else {
         requireThat(
           prePickup.includes(s.status),

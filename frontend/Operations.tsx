@@ -8,13 +8,18 @@ import {
 } from './PayoutAllocations';
 import { useUiStore } from './stores/useUiStore';
 import { useTracking } from './tracking';
-import { useEffect, useRef, useState, type RefObject, type FormEvent } from 'react';
+import { useEffect, useState, type RefObject, type FormEvent } from 'react';
 import { api } from './api';
 import { useAppStore } from './stores/useAppStore';
 import { Field } from './Field';
 import { dataFrom } from './forms';
 import { ActionForm } from './ActionForm';
-import { prePickup, cargoStates } from '../shared/planning.js';
+import {
+  prePickup,
+  cargoStates,
+  canAttachDeliveryProof,
+  redeliveryBlocker,
+} from '../shared/planning.js';
 import type { Action, Shipment, User, Payload } from './types';
 type Save = (work: () => Promise<unknown>, message: string) => Promise<void>;
 const cad = (cents: number) =>
@@ -42,13 +47,20 @@ function useResource<T>(path: string, revision: unknown) {
   }, [path, revision]);
   return { value, error };
 }
-function Planning({ s }: { s: Shipment }) {
+function Planning({ s, redelivery }: { s: Shipment; redelivery: boolean }) {
+  const plan = redelivery ? (s.redeliveryPlan ?? s) : s;
   return (
     <>
-      <Field id="plan-date" name="date" label="Pickup date" type="date" value={s.date} />
+      <Field
+        id="plan-date"
+        name="date"
+        label={redelivery ? 'Redelivery date' : 'Pickup date'}
+        type="date"
+        value={plan.date}
+      />
       <label>
-        Pickup window
-        <select name="window" defaultValue={s.window}>
+        {redelivery ? 'Redelivery window' : 'Pickup window'}
+        <select name="window" defaultValue={plan.window}>
           {['09:00–12:00', '13:00–16:00', 'Flexible'].map((v) => (
             <option key={v}>{v}</option>
           ))}
@@ -59,7 +71,7 @@ function Planning({ s }: { s: Shipment }) {
         name="deliveryDeadline"
         label="Delivery deadline (Edmonton time)"
         type="datetime-local"
-        value={s.deliveryDeadline}
+        value={plan.deliveryDeadline}
         required={false}
       />
       <label>
@@ -70,7 +82,7 @@ function Planning({ s }: { s: Shipment }) {
           min="0"
           max="10080"
           step="1"
-          defaultValue={s.estimatedMinutes || 0}
+          defaultValue={plan.estimatedMinutes || 0}
         />
       </label>
       <label>
@@ -81,7 +93,7 @@ function Planning({ s }: { s: Shipment }) {
           min="0"
           max="10080"
           step="1"
-          defaultValue={s.travelBufferMinutes || 0}
+          defaultValue={plan.travelBufferMinutes || 0}
         />
       </label>
     </>
@@ -98,6 +110,10 @@ export function WorkflowActions({
   busy: boolean;
   act: (action: Action, data?: Payload) => Promise<void>;
 }) {
+  const driverCanAct = useAppStore((state) =>
+    state.state?.drivers.some((driver) => driver.id === s.driverId && !driver.disabled),
+  );
+  const retryBlocker = redeliveryBlocker(s, driverCanAct);
   const form = (action: Action, label: string, plan = false) => (
     <ActionForm
       owner={user.id}
@@ -118,7 +134,7 @@ export function WorkflowActions({
         )
       }
     >
-      {plan && <Planning s={s} />}
+      {plan && <Planning s={s} redelivery={action === 'redeliver'} />}
       {action === 'confirmReturn' ? (
         <>
           <Field id="return-pod" name="pod" label="Return receipt reference" />
@@ -153,12 +169,16 @@ export function WorkflowActions({
           {form('failDelivery', 'Record failed attempt')}
         </details>
       )}
-      {user.role === 'admin' && s.status === 'Delivery failed' && (
-        <details>
-          <summary>Arrange redelivery</summary>
-          {form('redeliver', 'Schedule redelivery', true)}
-        </details>
-      )}
+      {user.role === 'admin' &&
+        s.status === 'Delivery failed' &&
+        (retryBlocker ? (
+          <p className="notice">{retryBlocker}</p>
+        ) : (
+          <details>
+            <summary>Arrange redelivery</summary>
+            {form('redeliver', 'Schedule redelivery', true)}
+          </details>
+        ))}
       {user.role === 'admin' && ['In transit', 'Delivery failed'].includes(s.status) && (
         <details>
           <summary>Arrange cargo return</summary>
@@ -169,6 +189,7 @@ export function WorkflowActions({
       {user.role === 'driver' &&
         s.driverId === user.id &&
         s.status === 'Returning' &&
+        s.arrivedAt &&
         (!s.issue || s.issue.resolved) &&
         form('confirmReturn', 'Confirm cargo return')}
     </>
@@ -347,8 +368,11 @@ export function EvidenceFiles({
           </label>
           <p>
             PNG, JPEG, or PDF; up to 2 MiB each. Ten files are allowed, plus a reserved
-            completion-proof slot for each delivery attempt if needed.
+            completion-proof slot after recording arrival at the final destination.
           </p>
+          {s.status === 'In transit' && !canAttachDeliveryProof(s) && (
+            <p>Files uploaded before final arrival are saved as general evidence.</p>
+          )}
           <button className="btn light" disabled={busy}>
             Attach evidence file
           </button>
@@ -528,6 +552,7 @@ interface Invoice {
     driverId?: string | null;
   }[];
 }
+const pendingFinancialEntries = new Map<string, string>();
 function InvoiceCard({
   invoice: i,
   user,
@@ -539,22 +564,36 @@ function InvoiceCard({
   busy: boolean;
   save: Save;
 }) {
-  const request = useRef<{ fingerprint: string; key: string } | null>(null);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = dataFrom(event.currentTarget),
       payload = { ...data, amount: Number(data.amount) };
-    const fingerprint = JSON.stringify(payload);
-    if (request.current?.fingerprint !== fingerprint)
-      request.current = { fingerprint, key: crypto.randomUUID() };
-    const key = request.current.key;
+    const storageKey = `yyc.pending-ledger-entry:${user.id}:${i.id}:${JSON.stringify(payload)}`;
     await save(async () => {
+      let key = pendingFinancialEntries.get(storageKey);
+      try {
+        key ||= sessionStorage.getItem(storageKey) || undefined;
+      } catch {
+        /* Keep the retry available in memory when storage is unavailable. */
+      }
+      key ||= crypto.randomUUID();
+      pendingFinancialEntries.set(storageKey, key);
+      try {
+        sessionStorage.setItem(storageKey, key);
+      } catch {
+        /* The in-memory key survives leaving Billing. */
+      }
       await api(`/api/invoices/${i.id}/entries`, 'POST', {
         ...payload,
         version: i.version,
         requestKey: key,
       });
-      request.current = null;
+      pendingFinancialEntries.delete(storageKey);
+      try {
+        sessionStorage.removeItem(storageKey);
+      } catch {
+        /* Storage may be unavailable. */
+      }
     }, 'Financial entry recorded.');
   }
   return (
@@ -630,6 +669,7 @@ function Billing({
   save,
   revision,
   accounts,
+  initialShipmentId,
 }: {
   user: User;
   shipments: Shipment[];
@@ -637,19 +677,26 @@ function Billing({
   busy: boolean;
   save: Save;
   revision: unknown;
+  initialShipmentId: string;
 }) {
-  const [selectedId, setSelectedId] = useState('');
-  const selected = shipments.find((s) => s.id === selectedId);
+  const [selectedId, setSelectedId] = useState(initialShipmentId);
+  const { value, error } = useResource<Invoice[]>(
+    user.role === 'driver' ? '/api/settlements' : '/api/invoices',
+    revision,
+  );
+  const eligible = shipments.filter(
+    (s) =>
+      ['Delivered', 'Returned'].includes(s.status) &&
+      !s.invoiceIssued &&
+      !value?.some((i) => i.shipmentId === s.id),
+  );
+  const selected = eligible.find((s) => s.id === selectedId);
   const participants = selected
     ? cargoDrivers(selected).map((driverId) => ({
         driverId,
         name: accounts.find((a) => a.id === driverId)?.name || driverId,
       }))
     : [];
-  const { value, error } = useResource<Invoice[]>(
-    user.role === 'driver' ? '/api/settlements' : '/api/invoices',
-    revision,
-  );
   return (
     <>
       <p>
@@ -663,13 +710,12 @@ function Billing({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              const data = dataFrom(event.currentTarget),
-                s = shipments.find((s) => s.id === data.shipmentId);
-              if (s)
+              const data = dataFrom(event.currentTarget);
+              if (selected)
                 void save(async () => {
                   await api('/api/invoices', 'POST', {
-                    shipmentId: s.id,
-                    version: s.version,
+                    shipmentId: selected.id,
+                    version: selected.version,
                     taxCents: Number(data.taxCents),
                     ...(participants.length > 1
                       ? { allocations: shareData(participants, data) }
@@ -684,21 +730,15 @@ function Billing({
               <select
                 name="shipmentId"
                 required
-                value={selectedId}
+                value={selected?.id ?? ''}
                 onChange={(event) => setSelectedId(event.target.value)}
               >
                 <option value="">Choose a delivery or return</option>
-                {shipments
-                  .filter(
-                    (s) =>
-                      ['Delivered', 'Returned'].includes(s.status) &&
-                      !value?.some((i) => i.shipmentId === s.id),
-                  )
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.id}
-                    </option>
-                  ))}
+                {eligible.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.id}
+                  </option>
+                ))}
               </select>
             </label>
             {participants.length > 1 && (
@@ -800,6 +840,7 @@ function Reports({ accounts, revision }: { accounts: User[]; revision: unknown }
 }
 export function OperationsPage({
   page,
+  billingShipmentId,
   user,
   shipments,
   accounts,
@@ -808,6 +849,7 @@ export function OperationsPage({
   revision,
 }: {
   page: string;
+  billingShipmentId: string;
   user: User;
   shipments: Shipment[];
   accounts: User[];
@@ -820,6 +862,8 @@ export function OperationsPage({
   if (page === 'billing')
     return (
       <Billing
+        key={billingShipmentId}
+        initialShipmentId={billingShipmentId}
         accounts={accounts}
         user={user}
         shipments={shipments}
@@ -832,6 +876,7 @@ export function OperationsPage({
 }
 
 interface Tracking {
+  driverId?: string;
   latitude?: number;
   longitude?: number;
   accuracy?: number;
@@ -862,7 +907,7 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
     <section className="card">
       <h2>Location and ETA</h2>
       {(error || loadError) && <p role="alert">{error || loadError}</p>}
-      {value?.recordedAt ? (
+      {value?.recordedAt && value.driverId === s.driverId ? (
         <>
           <p>
             Last shared: {new Date(value.recordedAt).toLocaleString()} · Accuracy ±
@@ -879,7 +924,7 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
       ) : (
         <p>No location has been shared.</p>
       )}
-      {value?.eta && s.status !== 'Delivery failed' && (
+      {value?.eta && !s.arrivedAt && s.status !== 'Delivery failed' && (
         <p>
           Estimated arrival: {new Date(value.eta).toLocaleString()} · Updated{' '}
           {value.etaUpdatedAt && new Date(value.etaUpdatedAt).toLocaleString()}
@@ -916,6 +961,7 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
         </p>
       )}
       {active &&
+        !s.arrivedAt &&
         s.status !== 'Delivery failed' &&
         (user.role === 'admin' || assigned) && (
           <form

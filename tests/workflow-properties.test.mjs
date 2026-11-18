@@ -80,7 +80,11 @@ test('workflow property: generated delivery traces enforce authorization, transi
         };
       }
       async function perform(command, step) {
-        if (command.action === 'deliver' && model.status === 'In transit') {
+        if (
+          command.action === 'deliver' &&
+          model.status === 'In transit' &&
+          model.arrived
+        ) {
           const s = (await admin('/api/state')).value.shipments.find((s) => s.id === id);
           if (!s.evidenceCount) {
             const reply = await admin(`/api/shipments/${id}/evidence`, 'POST', {
@@ -121,6 +125,7 @@ test('workflow property: generated delivery traces enforce authorization, transi
             command.actor === 'driver' &&
             model.driverId === driverId &&
             model.status === 'Assigned' &&
+            model.arrived &&
             !model.openIssue,
           deliver:
             command.actor === 'driver' &&

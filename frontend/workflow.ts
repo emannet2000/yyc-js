@@ -1,10 +1,22 @@
 import type { Shipment, User } from './types';
-import { canTakeCargo, driverAvailable } from '../shared/scheduling.js';
+import {
+  canTakeCargo,
+  driverAvailable,
+  driverVehicleBlockers,
+} from '../shared/scheduling.js';
+import {
+  cargoStates,
+  nextIntermediateStop,
+  pickupDatePassed,
+  prePickup,
+  redeliveryBlocker,
+} from '../shared/planning.js';
 export interface NextStep {
   title: string;
   detail: string;
   actionable: boolean;
   priority: number;
+  action?: 'invoice';
 }
 export function nextStep(s: Shipment, user: User, jobs: Shipment[] = []): NextStep {
   const step = (title: string, detail: string, actionable = false, priority = 90) => ({
@@ -13,6 +25,20 @@ export function nextStep(s: Shipment, user: User, jobs: Shipment[] = []): NextSt
     actionable,
     priority,
   });
+  if (
+    user.role === 'admin' &&
+    s.invoiceIssued === false &&
+    ['Delivered', 'Returned'].includes(s.status)
+  )
+    return {
+      ...step(
+        'Issue invoice',
+        'Review the completed job in Billing and issue the customer invoice.',
+        true,
+        40,
+      ),
+      action: 'invoice',
+    };
   if (['Delivered', 'Returned', 'Cancelled'].includes(s.status))
     return step(
       s.status === 'Cancelled' ? 'Request closed' : 'Delivery closed',
@@ -25,6 +51,15 @@ export function nextStep(s: Shipment, user: User, jobs: Shipment[] = []): NextSt
       true,
       5,
     );
+  if (prePickup.includes(s.status) && pickupDatePassed(s))
+    return step(
+      user.role === 'admin' ? 'Reschedule pickup' : 'Waiting for a new pickup date',
+      user.role === 'admin'
+        ? 'The pickup date has passed. Set a new date in Reschedule delivery.'
+        : 'The pickup date has passed. The broker needs to reschedule the delivery.',
+      user.role === 'admin',
+      8,
+    );
   if (user.role === 'driver' && s.rateChange?.driverId === user.id)
     return step(
       'Review the proposed driver rate',
@@ -34,15 +69,20 @@ export function nextStep(s: Shipment, user: User, jobs: Shipment[] = []): NextSt
       !!(user.approved && user.truck?.approved && !user.disabled),
       12,
     );
-  if (user.role === 'driver' && s.offeredTo === user.id)
+  if (user.role === 'driver' && s.offeredTo === user.id) {
+    const blockers = driverBlockers(s, user, jobs);
     return step(
       s.handover ? 'Review driver handover' : 'Review job offer',
-      'Review the route, cargo and driver rate, then accept or decline.',
-      user.approved && !!user.truck?.approved && !user.disabled,
+      blockers.length
+        ? `Acceptance is blocked. ${blockers.join(' · ')}. You can still decline the offer.`
+        : 'Review the route, cargo and driver rate, then accept or decline.',
+      true,
       15,
     );
+  }
   if (
     user.role === 'driver' &&
+    s.status === 'Assigned' &&
     s.driverId === user.id &&
     (!user.approved || !user.truck?.approved || user.disabled)
   )
@@ -62,6 +102,8 @@ export function nextStep(s: Shipment, user: User, jobs: Shipment[] = []): NextSt
       user.role === 'admin',
       0,
     );
+  if (s.status === 'Delivery failed' && user.role === 'admin' && s.handover)
+    return step('Review pending rescue handover', redeliveryBlocker(s)!, true, 5);
   if (s.status === 'Delivery failed' && involved)
     return step(
       user.role === 'admin'
@@ -144,32 +186,27 @@ export function nextStep(s: Shipment, user: User, jobs: Shipment[] = []): NextSt
   if (s.status === 'Returning')
     return step(
       'Return cargo to pickup',
-      'Record the return receipt reference and receiving contact when the cargo is returned.',
+      'Record arrival at the return location, then enter the return receipt reference and receiving contact.',
       true,
       10,
     );
-  const stop = s.stops?.find((stop) => !stop.completedAt);
+  const stop = nextIntermediateStop(s);
   return step(
     stop ? 'Complete your next stop' : 'Complete final delivery',
     stop
       ? `${stop.kind === 'pickup' ? 'Collect' : 'Deliver'} at ${stop.address}. Record the receipt and contact in Route and stops.`
-      : 'Record arrival and the receipt reference and recipient to confirm delivery.',
+      : 'After recording final arrival, upload a delivery photo, signature image, or receipt document for this attempt in Evidence files, then enter the receipt reference and recipient’s name before confirming delivery.',
     true,
     10,
   );
 }
 export function driverBlockers(s: Shipment, driver: User, jobs: Shipment[]): string[] {
-  const reasons: string[] = [];
-  if (driver.disabled) reasons.push('Account disabled');
-  if (!driver.approved || !driver.truck?.approved) reasons.push('Approval required');
-  if (!driver.truck) return [...reasons, 'No truck registered'];
-  if (driver.truck.type !== s.type) reasons.push(`Needs ${s.type}`);
-  if (driver.truck.kg < s.kg) reasons.push('Weight capacity too low');
-  if (driver.truck.pallets < s.pallets) reasons.push('Pallet capacity too low');
-  if (s.unloading.includes('Liftgate') && !driver.truck.liftgate)
-    reasons.push('Liftgate required');
+  const reasons: string[] = driverVehicleBlockers(s, driver);
+  if (!driver.truck) return reasons;
   if (!driverAvailable(s, jobs, driver.id))
     reasons.push('Schedule overlaps another commitment');
+  if (cargoStates.includes(s.status) && !canTakeCargo(s.id, jobs, driver.id))
+    reasons.push('Finish the current live load or pending cargo handover first');
   return reasons;
 }
 export function attentionQueue(shipments: Shipment[], user: User) {

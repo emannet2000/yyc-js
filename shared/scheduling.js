@@ -38,3 +38,18 @@ export function canTakeCargo(shipmentId, shipments, driverId) {
       (other.driverId === driverId || other.offeredTo === driverId),
   );
 }
+
+export function driverVehicleBlockers(shipment, driver) {
+  if (driver?.role !== 'driver') return ['Driver account required'];
+  const reasons = [];
+  if (driver.disabled) reasons.push('Account disabled');
+  if (!driver.approved || !driver.truck?.approved) reasons.push('Approval required');
+  const truck = driver.truck;
+  if (!truck) return [...reasons, 'No truck registered'];
+  if (truck.type !== shipment.type) reasons.push(`Needs ${shipment.type}`);
+  if (!(truck.kg >= shipment.kg)) reasons.push('Weight capacity too low');
+  if (!(truck.pallets >= shipment.pallets)) reasons.push('Pallet capacity too low');
+  if (shipment.unloading.includes('Liftgate') && !truck.liftgate)
+    reasons.push('Liftgate required');
+  return reasons;
+}

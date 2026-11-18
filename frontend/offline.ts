@@ -1,4 +1,11 @@
 import { api, ApiError } from './api';
+import {
+  canAttachDeliveryProof,
+  canRecordArrival,
+  nextIntermediateStop,
+  recordArrival,
+  recordPickup,
+} from '../shared/planning.js';
 import type { Action, Payload, Workspace, Shipment } from './types';
 export interface PendingAction {
   requestKey: string;
@@ -53,11 +60,15 @@ export function projectAction(s: Shipment, entry: PendingAction): Shipment {
   if (s.id !== entry.id || s.version !== entry.version) return s;
   const next: Shipment = JSON.parse(JSON.stringify(s)),
     time = entry.queuedAt;
+  const openIssue = !!s.issue && !s.issue.resolved;
   next.version++;
   switch (entry.action) {
     case 'acceptJob':
-      if (next.handover) delete next.handover;
-      else next.status = 'Assigned';
+      if (next.handover) {
+        delete next.handover;
+        delete next.arrivedAt;
+        next.evidenceCount = 0;
+      } else next.status = 'Assigned';
       next.driverId = String(entry.data.driverId);
       next.offeredTo = null;
       break;
@@ -67,31 +78,46 @@ export function projectAction(s: Shipment, entry: PendingAction): Shipment {
       next.offeredTo = null;
       break;
     case 'attachEvidence':
-      next.evidenceCount = (next.evidenceCount || 0) + 1;
+      if (canAttachDeliveryProof(next))
+        next.evidenceCount = (next.evidenceCount || 0) + 1;
       break;
     case 'arrival':
-      next.arrivedAt = time;
+      if (!canRecordArrival(s) || s.arrivedAt) return s;
+      recordArrival(next, time, next.version);
       break;
     case 'pickup':
-      next.status = 'In transit';
-      next.deliveryAttempt = 1;
+      if (
+        s.status !== 'Assigned' ||
+        openIssue ||
+        !s.arrivedAt ||
+        Date.parse(time) < Date.parse(s.arrivedAt)
+      )
+        return s;
+      recordPickup(next, time, next.version);
       next.evidenceCount = 0;
-      delete next.arrivedAt;
       break;
     case 'deliver':
+      if (!canAttachDeliveryProof(s) || openIssue || !s.evidenceCount) return s;
       next.status = 'Delivered';
       next.pod = String(entry.data.pod);
       next.recipient = String(entry.data.recipient);
       break;
     case 'completeStop': {
-      const stop = next.stops?.find((stop) => stop.id === entry.data.stopId);
-      if (stop)
-        Object.assign(stop, {
-          completedAt: time,
-          pod: String(entry.data.pod),
-          recipient: String(entry.data.recipient),
-        });
+      const stop = nextIntermediateStop(next);
+      if (
+        s.status !== 'In transit' ||
+        openIssue ||
+        !stop ||
+        stop.id !== entry.data.stopId
+      )
+        return s;
+      Object.assign(stop, {
+        completedAt: time,
+        pod: String(entry.data.pod),
+        recipient: String(entry.data.recipient),
+      });
       delete next.arrivedAt;
+      next.evidenceCount = 0;
       break;
     }
     case 'issue':
@@ -103,13 +129,17 @@ export function projectAction(s: Shipment, entry: PendingAction): Shipment {
       break;
     case 'failDelivery':
       next.status = 'Delivery failed';
+      delete next.arrivedAt;
+      next.evidenceCount = 0;
       break;
     case 'confirmReturn':
+      if (s.status !== 'Returning' || openIssue || !s.arrivedAt) return s;
       next.status = 'Returned';
       next.returnPod = String(entry.data.pod);
       next.returnRecipient = String(entry.data.recipient);
       break;
   }
+  if (!next.arrivedAt) delete next.finalArrivalVersion;
   return next;
 }
 export function projectQueue(state: Workspace): Workspace {
@@ -161,6 +191,7 @@ export async function sendDriverAction(entry: PendingAction) {
     action: entry.action,
     version: entry.version,
     requestKey: entry.requestKey,
+    ...(['arrival', 'pickup'].includes(entry.action) ? { queuedAt: entry.queuedAt } : {}),
   });
 }
 export const isConnectionFailure = (error: unknown) =>

@@ -45,7 +45,7 @@ export function DeliveryEvidence({
         />
       </div>
       <p role="status">
-        Delivery policy: record arrival at the final destination and attach a delivery
+        Delivery policy: record arrival at the final destination, then attach a delivery
         photo, signature image, or receipt for this delivery attempt in Evidence files
         before confirming. {arrived ? 'Arrival recorded.' : 'Arrival still required.'}{' '}
         {evidenceCount ? 'Evidence attached.' : 'Evidence file still required.'}

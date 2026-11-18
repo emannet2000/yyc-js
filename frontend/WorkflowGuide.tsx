@@ -4,10 +4,12 @@ export function WorkflowGuide({
   s,
   user,
   shipments,
+  openBilling,
 }: {
   s: Shipment;
   user: User;
   shipments: Shipment[];
+  openBilling: (id: string) => void;
 }) {
   const next = nextStep(s, user, shipments);
   return (
@@ -20,6 +22,11 @@ export function WorkflowGuide({
       </span>
       <h2>{next.title}</h2>
       <p>{next.detail}</p>
+      {next.action === 'invoice' && (
+        <button className="btn light" onClick={() => openBilling(s.id)}>
+          Open invoice form
+        </button>
+      )}
       {s.quoteExpiresAt && s.status === 'Quote ready' && (
         <small>Quote valid until {new Date(s.quoteExpiresAt).toLocaleString()}</small>
       )}
@@ -33,10 +40,12 @@ export function AttentionQueue({
   shipments,
   user,
   open,
+  openBilling,
 }: {
   shipments: Shipment[];
   user: User;
   open: (id: string) => void;
+  openBilling: (id: string) => void;
 }) {
   const queue = attentionQueue(shipments, user);
   return (
@@ -59,8 +68,13 @@ export function AttentionQueue({
                 </span>
                 <p>{next.detail}</p>
               </div>
-              <button className="btn light" onClick={() => open(s.id)}>
-                Review {s.id}
+              <button
+                className="btn light"
+                onClick={() =>
+                  next.action === 'invoice' ? openBilling(s.id) : open(s.id)
+                }
+              >
+                {next.action === 'invoice' ? 'Issue invoice for' : 'Review'} {s.id}
               </button>
             </li>
           ))}

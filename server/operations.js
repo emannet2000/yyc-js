@@ -1,7 +1,11 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { deliveryAttempt } from '../shared/planning.js';
+import { canAttachDeliveryProof, deliveryAttempt } from '../shared/planning.js';
 import { createSettlements } from './settlements.js';
 import { isPositiveMoney } from '../shared/money.js';
+import { archiveQuote } from './workflow.js';
+import { releaseDriverOffer } from './dispatch.js';
+import { currentDeliveryProof } from './delivery-evidence.js';
+import { publishedEta } from './tracking-eta.js';
 
 export function createOperations({
   db,
@@ -47,6 +51,13 @@ export function createOperations({
     );
   }
   const timestamp = () => new Date(now()).toISOString();
+  if (
+    !db
+      .prepare('PRAGMA table_info(evidence)')
+      .all()
+      .some((c) => c.name === 'final_arrival_version')
+  )
+    db.exec('ALTER TABLE evidence ADD COLUMN final_arrival_version INTEGER;');
   function notify(userId, shipmentId, message) {
     db.prepare(
       'INSERT INTO notifications(id,user_id,shipment_id,message,created_at,delivery_status) VALUES (?,?,?,?,?,?)',
@@ -91,18 +102,7 @@ export function createOperations({
           );
         }
         if (s.status === 'Quote ready' && s.quoteExpiresAt <= now()) {
-          s.quoteArchive = [
-            ...(s.quoteArchive || []),
-            {
-              version: s.quoteVersion,
-              price: s.price,
-              rate: s.rate,
-              destination: s.destination,
-              kg: s.kg,
-              pallets: s.pallets,
-              reason: 'Quotation expired',
-            },
-          ];
+          archiveQuote(s, 'Quotation expired');
           s.quoteVersion++;
           s.price = null;
           s.rate = null;
@@ -111,12 +111,7 @@ export function createOperations({
           messages.push('System: quotation expired; a new quotation is required');
         }
         if (s.offeredTo && s.offerExpiresAt <= now()) {
-          s.offeredTo = null;
-          delete s.offerExpiresAt;
-          delete s.handover;
-          if (s.rateChange && ![s.driverId, s.offeredTo].includes(s.rateChange.driverId))
-            delete s.rateChange;
-          if (s.status === 'Offered') s.status = 'Ready to assign';
+          releaseDriverOffer(s);
           messages.push('System: driver offer expired; reservation released');
         }
         if (messages.length) {
@@ -131,12 +126,7 @@ export function createOperations({
     for (const s of shipments({ role: 'admin' }).filter(
       (s) => s.offeredTo === driverId,
     )) {
-      s.offeredTo = null;
-      delete s.handover;
-      delete s.offerExpiresAt;
-      if (s.rateChange && ![s.driverId, s.offeredTo].includes(s.rateChange.driverId))
-        delete s.rateChange;
-      if (s.status === 'Offered') s.status = 'Ready to assign';
+      releaseDriverOffer(s);
       s.version++;
       persist(s);
       audit(s, actor, `Offer withdrawn: ${reason}`, [driverId]);
@@ -294,14 +284,22 @@ export function createOperations({
         .prepare('SELECT data FROM tracking WHERE shipment_id=?')
         .get(s.id);
       const current = previous ? JSON.parse(previous.data) : {};
+      if (current.driverId !== s.driverId) {
+        for (const key of ['latitude', 'longitude', 'accuracy', 'recordedAt', 'driverId'])
+          delete current[key];
+      }
       if (req.method === 'GET') {
-        send(
-          res,
-          200,
-          s.status === 'Delivery failed'
-            ? { ...current, eta: null, etaUpdatedAt: null, route: null }
-            : current,
-        );
+        const {
+          manualEta: _manualEta,
+          calculatedEta: _calculatedEta,
+          ...visible
+        } = current;
+        const estimate = publishedEta(s, current, now());
+        send(res, 200, {
+          ...visible,
+          ...estimate,
+          ...(s.status === 'Delivery failed' ? { route: null } : {}),
+        });
         return true;
       }
       if (req.method === 'POST') {
@@ -363,6 +361,11 @@ export function createOperations({
           'Arrange redelivery or return before publishing an ETA.',
         );
         requireThat(
+          !eta || !s.arrivedAt,
+          409,
+          'Arrival is already recorded for this stop.',
+        );
+        requireThat(
           !eta ||
             (Number.isFinite(Date.parse(eta)) &&
               Date.parse(eta) >= now() &&
@@ -370,7 +373,7 @@ export function createOperations({
           400,
           'Choose an ETA within the next 30 days.',
         );
-        Object.assign(current, { eta, etaUpdatedAt: timestamp(), etaSource: 'manual' });
+        current.manualEta = { eta, updatedAt: timestamp() };
       } else return false;
       db.prepare(
         'INSERT INTO tracking VALUES (?,?) ON CONFLICT(shipment_id) DO UPDATE SET data=excluded.data',
@@ -672,23 +675,19 @@ export function createOperations({
               : content.subarray(0, 5).toString() === '%PDF-';
         requireThat(signature, 400, 'File content does not match its type.');
         transaction(db, () => {
+          const atFinalDestination = canAttachDeliveryProof(s);
+          if (atFinalDestination) s.finalArrivalVersion ??= s.version;
           const count = db
             .prepare('SELECT COUNT(*) AS n FROM evidence WHERE shipment_id=?')
             .get(s.id).n;
-          const needsProof =
-            s.status === 'In transit' &&
-            !db
-              .prepare(
-                'SELECT 1 FROM evidence WHERE shipment_id=? AND pickup_version=? AND delivery_attempt=?',
-              )
-              .get(s.id, s.pickupVersion || 0, deliveryAttempt(s));
+          const needsProof = atFinalDestination && !currentDeliveryProof(db, s);
           requireThat(
             count < 10 || needsProof,
             409,
             'A delivery allows ten general files plus a reserved completion-proof file for each delivery attempt when needed.',
           );
           db.prepare(
-            'INSERT INTO evidence(id,shipment_id,actor_id,name,mime,content,sha256,created_at,pickup_version,delivery_attempt) VALUES (?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO evidence(id,shipment_id,actor_id,name,mime,content,sha256,created_at,pickup_version,delivery_attempt,final_arrival_version) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
           ).run(
             randomUUID(),
             s.id,
@@ -702,6 +701,7 @@ export function createOperations({
               ? s.pickupVersion || 0
               : null,
             s.status === 'In transit' ? deliveryAttempt(s) : null,
+            atFinalDestination ? s.finalArrivalVersion : null,
           );
           s.version++;
           persist(s);
@@ -760,7 +760,18 @@ export function createOperations({
         const existing = db
           .prepare('SELECT * FROM invoices WHERE shipment_id=?')
           .get(s.id);
+        const tax = data.taxCents ?? 0;
+        requireThat(
+          Number.isSafeInteger(tax) && tax >= 0 && tax <= 1000000000,
+          400,
+          'Tax must be a nonnegative whole-cent amount.',
+        );
         if (existing) {
+          requireThat(
+            tax === existing.tax_cents,
+            409,
+            'An invoice already exists with a different tax amount. Review the issued invoice.',
+          );
           if (data.allocations !== undefined) {
             const proposed = settlements.validate(
               s,
@@ -790,12 +801,6 @@ export function createOperations({
           isPositiveMoney(s.price) && isPositiveMoney(s.rate),
           409,
           'The delivery must have an agreed price and rate.',
-        );
-        const tax = data.taxCents ?? 0;
-        requireThat(
-          Number.isSafeInteger(tax) && tax >= 0 && tax <= 1000000000,
-          400,
-          'Tax must be a nonnegative whole-cent amount.',
         );
         const allocations = settlements.validate(s, data.allocations, cents(s.rate));
         const id = `INV-${randomUUID()}`;

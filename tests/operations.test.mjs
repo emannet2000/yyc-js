@@ -113,6 +113,17 @@ test('failed attempts retain cargo through redelivery and return, and only retur
     403,
   );
   await action(f.admin, id, 'redeliver', plan);
+  const redelivery = await find(f, id);
+  assert.equal(redelivery.date, booking().date);
+  assert.equal(redelivery.window, booking().window);
+  assert.equal(redelivery.redeliveryPlan.date, plan.date);
+  assert.equal(redelivery.redeliveryPlan.window, plan.window);
+  const overlapping = await job(f, {
+    date: plan.date,
+    window: plan.window,
+    stage: 'Ready to assign',
+  });
+  await action(f.admin, overlapping, 'offer', { driverId: f.driverId }, 409);
   await action(f.driver, id, 'failDelivery', {
     reason: 'Recipient refused',
     note: 'Return requested',
@@ -131,6 +142,14 @@ test('failed attempts retain cargo through redelivery and return, and only retur
     409,
   );
   await action(f.admin, id, 'resolve', { resolution: 'Dock cleared' });
+  await action(
+    f.driver,
+    id,
+    'confirmReturn',
+    { pod: 'RETURN', recipient: 'Warehouse' },
+    409,
+  );
+  assert.equal((await find(f, id)).status, 'Returning');
   await action(f.driver, id, 'confirmReturn', { pod: 'RETURN', recipient: 'Warehouse' });
   const returned = await find(f, id);
   assert.equal(returned.status, 'Returned');
@@ -307,6 +326,11 @@ test('financial entries enforce balance limits, idempotency and customer/driver 
     })
   ).value;
   assert.equal(invoice.totalCents, 45500);
+  const retryInvoice = (taxCents) =>
+    f.admin('/api/invoices', 'POST', { shipmentId: id, version: s.version, taxCents });
+  assert.equal((await retryInvoice(500)).value.id, invoice.id);
+  assert.equal((await retryInvoice(1200)).status, 409);
+  assert.equal((await f.admin('/api/invoices')).value[0].taxCents, 500);
   const post = async (kind, amount, key) =>
     f.admin(`/api/invoices/${invoice.id}/entries`, 'POST', {
       version: invoice.version,

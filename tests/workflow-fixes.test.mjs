@@ -38,6 +38,9 @@ test('disabled driver handover preserves the trip and quote, requires consent, a
     next = await replacement(f),
     id = await prepare(f);
   const before = await current(f.admin, id);
+  const tracking = `/api/shipments/${id}/tracking`;
+  const eta = new Date(Date.now() + 3600000).toISOString();
+  assert.equal((await f.admin(tracking, 'PATCH', { eta })).status, 200);
   await f.admin(`/api/accounts/${f.driverId}/status`, 'POST', {
     disabled: true,
     reason: 'Driver cannot continue',
@@ -50,6 +53,7 @@ test('disabled driver handover preserves the trip and quote, requires consent, a
   assert.equal(offered.status, 'In transit');
   assert.equal(offered.driverId, f.driverId);
   assert.equal(offered.offeredTo, next.id);
+  assert.equal((await f.store(tracking)).value.eta, eta);
   assert.equal((await f.driver('/api/state')).status, 401);
   await action(next.client, id, 'deliver', { pod: 'Too early', recipient: 'Staff' }, 403);
   assert.equal(
@@ -67,6 +71,7 @@ test('disabled driver handover preserves the trip and quote, requires consent, a
   assert.equal(accepted.status, 'In transit');
   assert.equal(accepted.offeredTo, null);
   assert.equal(accepted.handover, undefined);
+  assert.equal((await f.store(tracking)).value.eta, null);
   for (const key of [
     'price',
     'rate',

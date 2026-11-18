@@ -1,5 +1,7 @@
 import { randomBytes, createHash } from 'node:crypto';
-import { prePickup } from '../shared/planning.js';
+import { cargoStates, nextIntermediateStop, prePickup } from '../shared/planning.js';
+import { archiveQuote } from './workflow.js';
+import { publishedEta, recentDriverLocation } from './tracking-eta.js';
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const terminal = ['Delivered', 'Returned', 'Cancelled'];
 export function itinerary(s) {
@@ -54,20 +56,20 @@ export function createMobility({
           contact: text(stop, 'contact', true),
         };
       });
+      const previous = s.stops || [];
+      requireThat(
+        stops.length !== previous.length ||
+          stops.some(
+            (stop, i) =>
+              stop.kind !== previous[i].kind ||
+              stop.address !== previous[i].address.trim() ||
+              stop.contact !== (previous[i].contact || '').trim(),
+          ),
+        400,
+        'Change an intermediate stop before saving.',
+      );
       const reason = text(data, 'reason');
-      if (s.price != null)
-        s.quoteArchive = [
-          ...(s.quoteArchive || []),
-          {
-            version: s.quoteVersion,
-            price: s.price,
-            rate: s.rate,
-            destination: s.destination,
-            kg: s.kg,
-            pallets: s.pallets,
-            reason,
-          },
-        ];
+      if (s.price != null) archiveQuote(s, reason);
       Object.assign(s, {
         stops,
         quoteVersion: s.quoteVersion + 1,
@@ -98,7 +100,7 @@ export function createMobility({
       409,
       'Resolve the open issue before completing a stop.',
     );
-    const next = (s.stops || []).find((stop) => !stop.completedAt);
+    const next = nextIntermediateStop(s);
     requireThat(
       next && data.stopId === next.id,
       409,
@@ -130,24 +132,20 @@ export function createMobility({
     );
     const s = shipments({ role: 'admin' }, link.shipment_id, false)[0];
     const t = tracking(s.id);
-    const staleAutomaticEta =
-      t.etaSource === 'road-route' &&
-      (!t.recordedAt ||
-        !t.etaUpdatedAt ||
-        now() - Date.parse(t.etaUpdatedAt) >= 5 * 60000 ||
-        now() - Date.parse(t.recordedAt) >= 5 * 60000 ||
-        t.driverId !== s.driverId);
+    const { eta, etaUpdatedAt } = publishedEta(s, t, now());
     // Explicit allowlist: no accounts, rates, cargo, driver location or other recipients' addresses.
     send(res, 200, {
       id: s.id,
       status: s.status,
       date: s.date,
       window: s.window,
-      eta:
-        terminal.includes(s.status) || s.status === 'Delivery failed' || staleAutomaticEta
-          ? null
-          : t.eta || null,
-      etaUpdatedAt: t.etaUpdatedAt || null,
+      ...(s.redeliveryPlan && {
+        redeliveryDate: s.redeliveryPlan.date,
+        redeliveryWindow: s.redeliveryPlan.window,
+      }),
+      eta,
+      etaUpdatedAt,
+      ...(s.arrivedAt && { arrived: true }),
       stopsCompleted: (s.stops || []).filter((stop) => stop.completedAt).length,
       stopsTotal: (s.stops || []).length,
       expiresAt: link.expires_at,
@@ -185,10 +183,15 @@ export function createMobility({
       return true;
     }
     if (req.method === 'GET') {
+      const t = tracking(s.id);
+      const route = t.route;
+      const unavailable =
+        s.status === 'Delivery failed' ||
+        (s.status === 'Returning' && route?.source !== 'driver-location');
       send(
         res,
         200,
-        s.status === 'Delivery failed' ? null : tracking(s.id).route || null,
+        unavailable || !route ? null : { ...route, eta: publishedEta(s, t, now()).eta },
       );
       return true;
     }
@@ -219,14 +222,16 @@ export function createMobility({
     try {
       const previous = tracking(s.id);
       const recent =
-        s.driverId &&
-        ['Assigned', 'In transit', 'Delivery failed', 'Returning'].includes(s.status) &&
-        previous.recordedAt &&
-        now() - Date.parse(previous.recordedAt) < 5 * 60000 &&
-        previous.driverId === s.driverId;
+        (s.status === 'Assigned' || cargoStates.includes(s.status)) &&
+        recentDriverLocation(s, previous, now());
+      requireThat(
+        s.status !== 'Returning' || recent,
+        409,
+        'Share a recent driver location before calculating the return route.',
+      );
       const remaining = (
         s.status === 'Returning'
-          ? [{ id: 'return', kind: 'dropoff', address: s.pickup }]
+          ? [{ id: 'return', kind: 'dropoff', address: s.returnDestination || s.pickup }]
           : itinerary(s)
       )
         .filter(
@@ -291,22 +296,23 @@ export function createMobility({
         const seconds = calculated.legs[0]?.durationSeconds || 0;
         const eta = recent
           ? new Date(
-              now() + (seconds + (s.travelBufferMinutes || 0) * 60) * 1000,
+              now() +
+                (seconds + ((s.redeliveryPlan ?? s).travelBufferMinutes || 0) * 60) *
+                  1000,
             ).toISOString()
           : null;
+        Object.assign(t, {
+          route,
+          calculatedEta: {
+            eta,
+            updatedAt: route.calculatedAt,
+            recordedAt: previous.recordedAt,
+          },
+        });
         db.prepare(
           'INSERT INTO tracking VALUES (?,?) ON CONFLICT(shipment_id) DO UPDATE SET data=excluded.data',
-        ).run(
-          s.id,
-          JSON.stringify({
-            ...t,
-            route,
-            eta,
-            etaUpdatedAt: new Date(now()).toISOString(),
-            etaSource: 'road-route',
-          }),
-        );
-        result = { ...route, eta };
+        ).run(s.id, JSON.stringify(t));
+        result = { ...route, eta: publishedEta(current, t, now()).eta };
       });
     } finally {
       busyRoutes.delete(s.id);

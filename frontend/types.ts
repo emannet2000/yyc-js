@@ -29,7 +29,9 @@ export interface Quote {
   version: number;
   price?: number | null;
   rate?: number | null;
+  pickup?: string;
   destination: string;
+  stops?: Pick<Stop, 'kind' | 'address' | 'contact'>[];
   kg: number;
   pallets: number;
   reason: string;
@@ -48,7 +50,15 @@ export interface Stop {
   recipient?: string;
 }
 export interface Shipment {
+  redeliveryPlan?: Pick<
+    Shipment,
+    'date' | 'window' | 'deliveryDeadline' | 'estimatedMinutes' | 'travelBufferMinutes'
+  >;
   deliveryAttempt?: number;
+  finalArrivalVersion?: number;
+  pickupArrivedAt?: string;
+  pickupAt?: string;
+  pickupVersion?: number;
   pickupDriverId?: string;
   handoverHistory?: { status: string; fromDriverId: string; toDriverId: string }[];
   customerRequests?: {
@@ -68,6 +78,7 @@ export interface Shipment {
     policy: string;
   };
   evidenceCount?: number;
+  invoiceIssued?: boolean;
   stops?: Stop[];
   id: string;
   status: Status;

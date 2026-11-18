@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Journey, RecipientTracking, DriverTracking, OfflinePanel } from './Mobility';
-import { nextStep } from './workflow';
+import { driverBlockers, nextStep } from './workflow';
 import { WorkflowGuide, AttentionQueue, DispatchReadiness } from './WorkflowGuide';
 import { NativeTracking } from './NativeTracking';
 import { api, setCsrf } from './api';
@@ -33,8 +33,14 @@ import {
   BookingDraftControls,
   OperationsPage,
 } from './Operations';
-import { prePickup, cargoStates } from '../shared/planning.js';
-import { driverAvailable, canTakeCargo } from '../shared/scheduling.js';
+import {
+  prePickup,
+  cargoStates,
+  canRecordArrival,
+  nextIntermediateStop,
+  pickupDatePassed,
+} from '../shared/planning.js';
+import { canTakeCargo, driverVehicleBlockers } from '../shared/scheduling.js';
 import { useAppStore } from './stores/useAppStore';
 import { useUiStore } from './stores/useUiStore';
 import type { Action, Payload, Shipment, User } from './types';
@@ -433,18 +439,10 @@ function Actions({
       : emptyEvidence,
   );
   const setDraft = useUiStore((state) => state.setDeliveryDraft);
+  const missedPickup = prePickup.includes(s.status) && pickupDatePassed(s);
+  const pendingStop = s.status === 'In transit' && nextIntermediateStop(s);
   const availableDrivers = drivers.filter(
-    (d) =>
-      d.id !== s.driverId &&
-      (!cargoStates.includes(s.status) || canTakeCargo(s.id, shipments, d.id)) &&
-      driverAvailable(s, shipments, d.id) &&
-      d.approved &&
-      d.truck?.approved &&
-      !d.disabled &&
-      d.truck.type === s.type &&
-      d.truck.kg >= s.kg &&
-      d.truck.pallets >= s.pallets &&
-      (!s.unloading.includes('Liftgate') || d.truck.liftgate),
+    (driver) => driver.id !== s.driverId && !driverBlockers(s, driver, shipments).length,
   );
   const button = (action: Action, label: string, blocked = false) => (
     <button
@@ -455,11 +453,17 @@ function Actions({
       {label}
     </button>
   );
-  const form = (action: Action, label: string, children: ReactNode) => (
+  const form = (
+    action: Action,
+    label: string,
+    children: ReactNode,
+    draftScope?: string,
+  ) => (
     <ActionForm
       owner={user.id}
       shipmentId={s.id}
       action={action}
+      draftScope={draftScope}
       busy={busy}
       label={label}
       onSave={(data) => act(action, data)}
@@ -473,6 +477,7 @@ function Actions({
       {user.role === 'admin' && (
         <>
           {s.status === 'Awaiting quote' &&
+            !missedPickup &&
             form(
               'quote',
               'Issue quotation',
@@ -537,38 +542,56 @@ function Actions({
                 )}
               </section>
             ) : (
-              <details>
-                <summary>Arrange driver handover</summary>
-                <p className="notice">
-                  Keeps the shipment and accepted quote. The replacement must accept
-                  before responsibility transfers. A picked-up delivery remains in
-                  transit.
-                </p>
-                {form(
-                  'handover',
-                  'Offer handover',
-                  <>
-                    <div className="field">
-                      <label htmlFor="handover-driver">Replacement driver</label>
-                      <select id="handover-driver" name="driverId" required>
-                        <option value="">Choose a replacement driver</option>
-                        {availableDrivers.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.name} · {d.truck?.plate}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <Field
-                      id="handover-reason"
-                      name="reason"
-                      label="Reason for driver handover"
-                    />
-                  </>,
-                )}
-              </details>
+              !missedPickup && (
+                <details>
+                  <summary>Arrange driver handover</summary>
+                  <p className="notice">
+                    Keeps the shipment and accepted quote. The replacement must accept
+                    before responsibility transfers. A picked-up delivery remains in
+                    transit.
+                  </p>
+                  {form(
+                    'handover',
+                    'Offer handover',
+                    <>
+                      <div className="field">
+                        <label htmlFor="handover-driver">Replacement driver</label>
+                        <select id="handover-driver" name="driverId" required>
+                          <option value="">Choose a replacement driver</option>
+                          {availableDrivers.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name} · {d.truck?.plate}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <Field
+                        id="handover-reason"
+                        name="reason"
+                        label="Reason for driver handover"
+                      />
+                    </>,
+                  )}
+                </details>
+              )
             ))}
+          {s.status === 'Offered' && s.offeredTo && (
+            <details>
+              <summary>Withdraw job offer</summary>
+              {form(
+                'withdrawOffer',
+                'Withdraw offer',
+                <Field
+                  id="withdraw-offer-reason"
+                  name="reason"
+                  label="Reason for withdrawing offer"
+                />,
+                `${s.offeredTo}:${s.offerExpiresAt}`,
+              )}
+            </details>
+          )}
           {s.status === 'Ready to assign' &&
+            !missedPickup &&
             form(
               'offer',
               'Send job offer',
@@ -577,23 +600,11 @@ function Actions({
                 <label htmlFor="driverId">Approved suitable driver</label>
                 <select id="driverId" name="driverId" required>
                   <option value="">Choose a driver</option>
-                  {drivers
-                    .filter(
-                      (d) =>
-                        driverAvailable(s, shipments, d.id) &&
-                        d.approved &&
-                        d.truck?.approved &&
-                        !d.disabled &&
-                        d.truck.type === s.type &&
-                        d.truck.kg >= s.kg &&
-                        d.truck.pallets >= s.pallets &&
-                        (!s.unloading.includes('Liftgate') || d.truck.liftgate),
-                    )
-                    .map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name} · {d.truck?.plate}
-                      </option>
-                    ))}
+                  {availableDrivers.map((driver) => (
+                    <option key={driver.id} value={driver.id}>
+                      {driver.name} · {driver.truck?.plate}
+                    </option>
+                  ))}
                 </select>
               </div>,
             )}
@@ -628,7 +639,8 @@ function Actions({
       )}
       {user.role === 'store' && (
         <>
-          {s.status === 'Quote ready' && button('acceptQuote', 'Accept quotation')}
+          {s.status === 'Quote ready' &&
+            button('acceptQuote', 'Accept quotation', missedPickup)}
           {['Awaiting quote', 'Quote ready'].includes(s.status) &&
             button('cancel', 'Cancel request')}
         </>
@@ -641,9 +653,7 @@ function Actions({
                 {button(
                   'acceptJob',
                   s.handover ? 'Accept handover' : 'Accept job',
-                  !!s.handover &&
-                    cargoStates.includes(s.status) &&
-                    !canTakeCargo(s.id, shipments, user.id),
+                  missedPickup || !!driverBlockers(s, user, shipments).length,
                 )}
                 {button('decline', s.handover ? 'Decline handover' : 'Decline offer')}
                 {s.issue && !s.issue.resolved && (
@@ -657,12 +667,17 @@ function Actions({
             )}
           {active && s.driverId === user.id && (
             <>
-              {!s.arrivedAt && button('arrival', 'Record arrival')}
+              {!s.arrivedAt &&
+                canRecordArrival(s) &&
+                button('arrival', 'Record arrival', missedPickup)}
               {s.status === 'Assigned' &&
                 button(
                   'pickup',
                   'Confirm pickup',
-                  !canTakeCargo(s.id, shipments, user.id) ||
+                  missedPickup ||
+                    !s.arrivedAt ||
+                    !!driverVehicleBlockers(s, user).length ||
+                    !canTakeCargo(s.id, shipments, user.id) ||
                     !!(s.issue && !s.issue.resolved),
                 )}
               {s.status === 'Assigned' && s.issue && !s.issue.resolved && (
@@ -678,7 +693,7 @@ function Actions({
               )}
               {s.status === 'In transit' &&
                 (!s.issue || s.issue.resolved) &&
-                !(s.stops || []).some((stop) => !stop.completedAt) && (
+                !pendingStop && (
                   <DeliveryEvidence
                     draft={draft}
                     onChange={(next) => setDraft(user.id, s.id, next)}
@@ -717,6 +732,7 @@ function Delivery({
   act,
   close,
   shipments,
+  openBilling,
 }: {
   shipments: Shipment[];
   s: Shipment;
@@ -725,6 +741,7 @@ function Delivery({
   busy: boolean;
   act: (action: Action, data?: Payload) => Promise<void>;
   close: () => void;
+  openBilling: (id: string) => void;
 }) {
   const container = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -785,12 +802,23 @@ function Delivery({
         </div>
         <Badge status={s.status} />
         <p>{s.customer}</p>
-        <WorkflowGuide s={s} user={user} shipments={shipments} />
+        <WorkflowGuide
+          s={s}
+          user={user}
+          shipments={shipments}
+          openBilling={openBilling}
+        />
         <Route shipment={s} />
         <section className="card">
           <h2>{s.goods}</h2>
           <p>
             {s.date} · {s.window}
+            {s.redeliveryPlan && (
+              <>
+                <br />
+                Redelivery: {s.redeliveryPlan.date} · {s.redeliveryPlan.window}
+              </>
+            )}
             <br />
             {s.pallets} pallets · {s.kg} kg · {s.type}
             <br />
@@ -837,8 +865,8 @@ function Delivery({
         <CustomerRequests s={s} user={user} busy={busy} act={act} />
         <RateChange s={s} user={user} busy={busy} act={act} />
         <WorkflowActions s={s} user={user} busy={busy} act={act} />
-        <Journey s={s} user={user} />
-        <LocationTracker s={s} user={user} />
+        <Journey key={`${user.id}:${s.id}`} s={s} user={user} />
+        <LocationTracker key={s.driverId} s={s} user={user} />
         <NativeTracking s={s} user={user} />
         <EvidenceFiles s={s} user={user} busy={busy} save={useAppStore.getState().save} />
         {s.deliveryDeadline && (
@@ -866,10 +894,24 @@ function Delivery({
           <section className="card">
             <h2>Previous quotations</h2>
             {s.quoteArchive.map((q) => (
-              <p key={q.version}>
-                v{q.version} · {money(user.role === 'driver' ? q.rate : q.price)} ·{' '}
-                {q.reason}
-              </p>
+              <div key={q.version}>
+                <p>
+                  v{q.version} · {money(user.role === 'driver' ? q.rate : q.price)} ·{' '}
+                  {q.reason}
+                </p>
+                {q.pickup && (
+                  <ol>
+                    <li>Pickup: {q.pickup}</li>
+                    {q.stops?.map((stop, i) => (
+                      <li key={i}>
+                        {stop.kind === 'pickup' ? 'Pickup' : 'Drop-off'}: {stop.address}
+                        {stop.contact && ` · ${stop.contact}`}
+                      </li>
+                    ))}
+                    <li>Delivery: {q.destination}</li>
+                  </ol>
+                )}
+              </div>
             ))}
           </section>
         )}
@@ -918,6 +960,7 @@ function App() {
   const clearMessage = useAppStore((s) => s.clearMessage);
 
   const page = useUiStore((s) => s.page);
+  const billingShipmentId = useUiStore((s) => s.billingShipmentId);
   const selected = useUiStore((s) => s.selected);
   const query = useUiStore((s) => s.query);
   const status = useUiStore((s) => s.status);
@@ -1052,61 +1095,77 @@ function App() {
           )
         : filtered;
   const current = shipments.find((s) => s.id === selected);
+  function openBilling(id: string) {
+    close();
+    setPage('billing', id);
+  }
   function cards(list: Shipment[]) {
     return list.length ? (
       <div className="grid2 shipment-grid">
-        {list.map((s) => (
-          <article className="card shipment-card" key={s.id}>
-            <div className="row between">
-              <h2>{s.id}</h2>
-              <Badge status={s.status} />
-            </div>
-            <p className="shipment-customer">{s.customer}</p>
-            <div className="shipment-appointment">
-              <span aria-hidden="true">▦</span>
-              <strong>
-                {new Date(`${s.date}T12:00:00`).toLocaleDateString('en-CA', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-              </strong>
-              <span>{s.window}</span>
-            </div>
-            <Route shipment={s} />
-            <div className="shipment-cargo">
-              <span>{s.goods}</span>
-              <span>
-                {s.pallets} pallets · {s.kg} kg
-              </span>
-              {!!s.stops?.length && <span>{s.stops.length + 2} stops</span>}
-            </div>
-            {s.issue && !s.issue.resolved && (
-              <div className="shipment-alert">
-                <span aria-hidden="true">!</span> Open exception · {s.issue.reason}
+        {list.map((s) => {
+          const next = nextStep(s, user, shipments);
+          const appointment = s.redeliveryPlan ?? s;
+          return (
+            <article className="card shipment-card" key={s.id}>
+              <div className="row between">
+                <h2>{s.id}</h2>
+                <Badge status={s.status} />
               </div>
-            )}
-            <div className="shipment-next-step">
-              <small>
-                {nextStep(s, user, shipments).actionable
-                  ? 'Next step'
-                  : 'Current handoff'}
-              </small>
-              <strong>{nextStep(s, user, shipments).title}</strong>
-            </div>
-            <div className="shipment-card-footer">
-              <div>
-                <small>
-                  {user.role === 'driver' ? 'Your driver rate' : 'Customer quotation'}
-                </small>
-                <strong>{money(user.role === 'driver' ? s.rate : s.price)}</strong>
+              <p className="shipment-customer">{s.customer}</p>
+              <div className="shipment-appointment">
+                <span aria-hidden="true">▦</span>
+                <strong>
+                  {new Date(`${appointment.date}T12:00:00`).toLocaleDateString('en-CA', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}
+                </strong>
+                <span>
+                  {s.redeliveryPlan && 'Redelivery · '}
+                  {appointment.window}
+                </span>
               </div>
-              <button className="btn light" onClick={() => select(s.id)}>
-                View delivery →
-              </button>
-            </div>
-          </article>
-        ))}
+              <Route shipment={s} />
+              <div className="shipment-cargo">
+                <span>{s.goods}</span>
+                <span>
+                  {s.pallets} pallets · {s.kg} kg
+                </span>
+                {!!s.stops?.length && <span>{s.stops.length + 2} stops</span>}
+              </div>
+              {s.issue && !s.issue.resolved && (
+                <div className="shipment-alert">
+                  <span aria-hidden="true">!</span> Open exception · {s.issue.reason}
+                </div>
+              )}
+              <div className="shipment-next-step">
+                <small>{next.actionable ? 'Next step' : 'Current handoff'}</small>
+                <strong>{next.title}</strong>
+              </div>
+              <div className="shipment-card-footer">
+                <div>
+                  <small>
+                    {user.role === 'driver' ? 'Your driver rate' : 'Customer quotation'}
+                  </small>
+                  <strong>{money(user.role === 'driver' ? s.rate : s.price)}</strong>
+                </div>
+                <button
+                  className="btn light"
+                  onClick={() =>
+                    page === 'alerts' && next.action === 'invoice'
+                      ? openBilling(s.id)
+                      : select(s.id)
+                  }
+                >
+                  {page === 'alerts' && next.action === 'invoice'
+                    ? `Issue invoice for ${s.id}`
+                    : 'View delivery →'}
+                </button>
+              </div>
+            </article>
+          );
+        })}
       </div>
     ) : (
       <section className="card empty">
@@ -1236,6 +1295,7 @@ function App() {
             {['notifications', 'billing', 'reports'].includes(page) ? (
               <OperationsPage
                 page={page}
+                billingShipmentId={billingShipmentId}
                 user={user}
                 shipments={shipments}
                 accounts={accounts}
@@ -1411,7 +1471,12 @@ function App() {
                         </span>
                       </div>
                     </section>
-                    <AttentionQueue shipments={shipments} user={user} open={select} />
+                    <AttentionQueue
+                      shipments={shipments}
+                      user={user}
+                      open={select}
+                      openBilling={openBilling}
+                    />
                     <div className="stats">
                       {[
                         [
@@ -1543,6 +1608,7 @@ function App() {
           drivers={drivers}
           busy={busy || needsRefresh}
           close={close}
+          openBilling={openBilling}
           act={(action, data = {}) => act(current.id, current.version, action, data)}
         />
       )}

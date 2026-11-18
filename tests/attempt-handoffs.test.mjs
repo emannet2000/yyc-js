@@ -91,6 +91,7 @@ test('redelivery needs fresh current-attempt proof, including a reserved file sl
     f = await assigned(t, { now: () => fixed });
   for (let n = 0; n < 10; n++) await attachDeliveryEvidence(f.driver, f.id);
   await action(f.driver, f.id, 'pickup');
+  await action(f.driver, f.id, 'arrival');
   await attachDeliveryEvidence(f.driver, f.id);
   const first = await f.state();
   assert.equal(first.deliveryAttempt, 1);
@@ -226,27 +227,32 @@ test('payout reversals remain available during legacy allocation review and unbl
   rmSync(directory, { recursive: true, force: true });
 });
 
-test('migration retains unambiguous first-attempt files but requires fresh proof for legacy retry files', async (t) => {
+test('migration preserves evidence files and requires fresh proof when arrival scope is missing', async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'yyc-attempt-migration-')),
     path = join(directory, 'app.sqlite');
   const f = await assigned(t, { databasePath: path });
   await action(f.driver, f.id, 'pickup');
+  await action(f.driver, f.id, 'arrival');
   await attachDeliveryEvidence(f.driver, f.id);
   await f.stop();
   let db = new DatabaseSync(path);
-  db.exec('ALTER TABLE evidence DROP COLUMN delivery_attempt;');
+  db.exec('ALTER TABLE evidence DROP COLUMN final_arrival_version;');
   db.close();
   const first = await start(t, { databasePath: path }),
     driver = first.client(),
     broker = first.client();
   await login(driver, 'driver@example.com');
   await login(broker, 'admin@example.com');
+  assert.equal((await driver('/api/state')).value.shipments[0].evidenceCount, 0);
+  assert.equal((await driver(`/api/shipments/${f.id}/evidence`)).value.length, 1);
+  await attachDeliveryEvidence(driver, f.id);
   assert.equal((await driver('/api/state')).value.shipments[0].evidenceCount, 1);
   await action(driver, f.id, 'failDelivery', {
     reason: 'Receiver absent',
     note: 'Try again',
   });
   await action(broker, f.id, 'redeliver', retryPlan);
+  await action(driver, f.id, 'arrival');
   await attachDeliveryEvidence(driver, f.id);
   await first.stop();
   db = new DatabaseSync(path);
@@ -260,4 +266,44 @@ test('migration retains unambiguous first-attempt files but requires fresh proof
   assert.equal((await retryDriver('/api/state')).value.shipments[0].evidenceCount, 1);
   await retry.stop();
   rmSync(directory, { recursive: true, force: true });
+});
+
+test('failed cargo keeps its rescue handover and can be redelivered after transfer', async (t) => {
+  const f = await assigned(t);
+  await action(f.driver, f.id, 'pickup');
+  const next = f.client();
+  const email = 'rescue-before-redelivery@example.com';
+  const { id: driverId } = (
+    await next('/api/register', 'POST', registration('driver', email))
+  ).value;
+  await login(next, email);
+  await f.admin(`/api/drivers/${driverId}/approve`, 'POST', {});
+  await action(f.admin, f.id, 'handover', { driverId, reason: 'Rescue truck arranged' });
+  await action(f.driver, f.id, 'failDelivery', {
+    reason: 'Truck stopped',
+    note: 'Awaiting rescue',
+  });
+  assert.equal((await f.state()).offeredTo, driverId);
+  assert.equal(
+    (
+      await f.admin(`/api/accounts/${f.driverId}/status`, 'POST', {
+        disabled: true,
+        reason: 'Original driver unavailable',
+      })
+    ).status,
+    200,
+  );
+  const pending = await f.state();
+  await action(f.admin, f.id, 'redeliver', retryPlan, 409);
+  assert.deepEqual(await f.state(), pending);
+  await action(f.admin, f.id, 'withdrawHandover', {
+    reason: 'Replacement changed plans',
+  });
+  const disabled = await action(f.admin, f.id, 'redeliver', retryPlan, 409);
+  assert.match(disabled.value.error, /active cargo driver/);
+  await action(f.admin, f.id, 'handover', { driverId, reason: 'Replacement confirmed' });
+  await action(next, f.id, 'acceptJob');
+  await action(f.admin, f.id, 'redeliver', retryPlan);
+  assert.equal((await f.state()).status, 'In transit');
+  assert.equal((await f.state()).driverId, driverId);
 });

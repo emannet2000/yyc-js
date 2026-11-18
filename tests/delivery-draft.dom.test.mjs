@@ -12,7 +12,6 @@ async function openDelivery(t) {
   await action(f.admin, id, 'offer', { driverId: f.driverId });
   await action(f.driver, id, 'acceptJob');
   await action(f.driver, id, 'pickup');
-  await attachDeliveryEvidence(f.driver, id);
   const ui = await renderApp(t, f.driver);
   await ui.drawer('input[name="pod"]');
   await ui.input('pod', 'DRAFT-RECEIPT-123');
@@ -24,6 +23,7 @@ test('delivery evidence survives a version conflict and submits only after a rev
   const f = await openDelivery(t),
     original = f.doc.querySelector('input[name="pod"]');
   await action(f.driver, f.id, 'arrival');
+  await attachDeliveryEvidence(f.driver, f.id);
   f.button('Confirm delivery').click();
   await f.wait(() =>
     f.doc.querySelector('.toast')?.textContent.includes('Delivery changed'),

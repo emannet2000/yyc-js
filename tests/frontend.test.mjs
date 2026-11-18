@@ -27,7 +27,10 @@ const uiUrl = compile('../frontend/stores/useUiStore.ts', {
   '../actionDrafts': actionDraftsUrl,
   zustand: new URL('../node_modules/zustand/esm/index.mjs', import.meta.url).href,
 });
-const offlineUrl = compile('../frontend/offline.ts', { './api': apiUrl });
+const offlineUrl = compile('../frontend/offline.ts', {
+  './api': apiUrl,
+  '../shared/planning.js': new URL('../shared/planning.js', import.meta.url).href,
+});
 const trackingUrl = compile('../frontend/tracking.ts', {
   zustand: new URL('../node_modules/zustand/esm/index.mjs', import.meta.url).href,
 });
@@ -549,4 +552,74 @@ test('background sync skips mutations and leaves a warning on failure; session e
   globalThis.fetch = async () => json({ error: 'Expired' }, 401);
   await store.getState().sync();
   assert.equal(store.getState().state, null);
+});
+
+test('offline milestones keep the same pickup and final-arrival proof scope as the server', async () => {
+  const { projectAction } = await import(offlineUrl);
+  let job = {
+    id: 'delivery',
+    version: 1,
+    status: 'Assigned',
+    driverId: 'driver',
+    stops: [{ id: 'stop-1' }],
+  };
+  function queue(action, queuedAt, data = {}) {
+    job = projectAction(job, {
+      id: job.id,
+      version: job.version,
+      requestKey: `pending-${job.version}`,
+      action,
+      data,
+      queuedAt,
+    });
+  }
+  const pickupArrival = '2099-11-05T16:00:00.000Z';
+  const pickupTime = '2099-11-05T16:05:00.000Z';
+  const finalArrival = '2099-11-05T18:00:00.000Z';
+  queue('arrival', pickupArrival);
+  queue('pickup', pickupTime);
+  assert.equal(job.pickupArrivedAt, pickupArrival);
+  assert.equal(job.pickupAt, pickupTime);
+  assert.equal(job.pickupVersion, job.version);
+  assert.equal(job.pickupDriverId, 'driver');
+  queue('attachEvidence', '2099-11-05T17:00:00.000Z');
+  assert.equal(job.evidenceCount, 0);
+  queue('completeStop', '2099-11-05T17:05:00.000Z', { stopId: 'stop-1' });
+  queue('arrival', finalArrival);
+  assert.equal(job.arrivedAt, finalArrival);
+  assert.equal(job.finalArrivalVersion, job.version);
+  queue('attachEvidence', '2099-11-05T18:01:00.000Z');
+  assert.equal(job.evidenceCount, 1);
+});
+
+test('offline projection keeps invalid milestone actions pending without advancing the delivery', async () => {
+  const { projectAction } = await import(offlineUrl);
+  const pickup = { id: 'job', version: 1, status: 'Assigned' };
+  const inTransit = {
+    ...pickup,
+    status: 'In transit',
+    version: 3,
+    stops: [{ id: 'first' }, { id: 'second' }],
+  };
+  const arrived = { ...inTransit, stops: [], arrivedAt: '2099-11-05T17:00:00.000Z' };
+  const returning = { ...inTransit, status: 'Returning' };
+  for (const [shipment, action, data] of [
+    [pickup, 'pickup', {}],
+    [inTransit, 'arrival', {}],
+    [inTransit, 'completeStop', { stopId: 'second' }],
+    [arrived, 'deliver', { pod: 'REFERENCE', recipient: 'Staff' }],
+    [returning, 'confirmReturn', { pod: 'REFERENCE', recipient: 'Staff' }],
+  ]) {
+    assert.equal(
+      projectAction(shipment, {
+        id: shipment.id,
+        version: shipment.version,
+        requestKey: 'offline-test-key',
+        action,
+        data,
+        queuedAt: '2099-11-05T17:05:00.000Z',
+      }),
+      shipment,
+    );
+  }
 });

@@ -12,7 +12,16 @@ import type { Shipment, User, Stop } from './types';
 
 export function Journey({ s, user }: { s: Shipment; user: User }) {
   const { act, save, busy } = useAppStore();
-  const [stops, setStops] = useState<Stop[]>(s.stops || []);
+  const [stopDraft, setStopDraft] = useState<{ base: string; stops: Stop[] } | null>(
+    null,
+  );
+  const savedStops = s.stops || [];
+  const savedStopKey = JSON.stringify(savedStops);
+  const stops = stopDraft?.stops ?? savedStops;
+  const stopConflict = !!stopDraft && stopDraft.base !== savedStopKey;
+  function setStops(editedStops: Stop[]) {
+    setStopDraft({ base: stopDraft?.base ?? savedStopKey, stops: editedStops });
+  }
   const [link, setLink] = useState(''),
     [error, setError] = useState('');
   const [route, setRoute] = useState<{
@@ -23,18 +32,23 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
     source: string;
   } | null>(null);
   useEffect(() => {
-    setStops(s.stops || []);
     setRoute(null);
-  }, [s.id, s.version, s.stops]);
+  }, [s.id, s.version]);
   useEffect(() => {
     let cancelled = false;
-    void api<typeof route>(`/api/shipments/${s.id}/route`)
-      .then((value) => {
+    async function refreshRoute() {
+      try {
+        const value = await api<typeof route>(`/api/shipments/${s.id}/route`);
         if (!cancelled) setRoute(value);
-      })
-      .catch(() => {});
+      } catch {
+        // Keep the last route when the connection drops.
+      }
+    }
+    void refreshRoute();
+    const timer = setInterval(() => void refreshRoute(), 30000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, [s.id, s.version]);
   const editable =
@@ -155,43 +169,47 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
         </li>
       </ol>
       {error && <p role="alert">{error}</p>}
-      {route && s.status !== 'Delivery failed' && (
-        <div className="route-summary">
-          <div>
-            <span>Road distance</span>
-            <strong>
-              {(route.distanceMeters / 1000).toFixed(1)} <small>km</small>
-            </strong>
+      {route &&
+        s.status !== 'Delivery failed' &&
+        (!returning || route.source === 'driver-location') && (
+          <div className="route-summary">
+            <div>
+              <span>Road distance</span>
+              <strong>
+                {(route.distanceMeters / 1000).toFixed(1)} <small>km</small>
+              </strong>
+            </div>
+            <div>
+              <span>Driving time</span>
+              <strong>
+                {Math.ceil(route.durationSeconds / 60)} <small>min</small>
+              </strong>
+            </div>
+            <div>
+              <span>Next stop ETA</span>
+              <strong className="eta-value">
+                {s.arrivedAt
+                  ? 'Arrived'
+                  : route.eta
+                    ? new Date(route.eta).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : 'Awaiting GPS'}
+              </strong>
+            </div>
+            <p>
+              {route.source === 'driver-location'
+                ? 'Based on recent driver GPS'
+                : 'Based on planned addresses'}{' '}
+              · Updated{' '}
+              {new Date(route.calculatedAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </p>
           </div>
-          <div>
-            <span>Driving time</span>
-            <strong>
-              {Math.ceil(route.durationSeconds / 60)} <small>min</small>
-            </strong>
-          </div>
-          <div>
-            <span>Next stop ETA</span>
-            <strong className="eta-value">
-              {route.eta
-                ? new Date(route.eta).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : 'Awaiting GPS'}
-            </strong>
-          </div>
-          <p>
-            {route.source === 'driver-location'
-              ? 'Based on recent driver GPS'
-              : 'Based on planned addresses'}{' '}
-            · Updated{' '}
-            {new Date(route.calculatedAt).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </p>
-        </div>
-      )}
+        )}
       <div className="journey-tools">
         {(user.role === 'admin' || s.driverId === user.id) &&
           s.status !== 'Delivery failed' &&
@@ -233,8 +251,23 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
           <form
             onSubmit={(event: FormEvent<HTMLFormElement>) => {
               event.preventDefault();
-              const reason = String(new FormData(event.currentTarget).get('reason'));
-              void act(s.id, s.version, 'setStops', { stops, reason });
+              if (stopConflict) return;
+              const form = event.currentTarget;
+              const reason = String(new FormData(form).get('reason'));
+              void save(
+                () =>
+                  api(`/api/shipments/${s.id}/actions`, 'POST', {
+                    action: 'setStops',
+                    version: s.version,
+                    stops,
+                    reason,
+                  }),
+                'Delivery updated.',
+                () => {
+                  setStopDraft(null);
+                  form.reset();
+                },
+              );
             }}
           >
             {stops.map((stop, i) => (
@@ -325,7 +358,24 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
               Changing stops clears the quote and driver assignment and requires a new
               customer acceptance.
             </p>
-            <button className="btn" disabled={busy}>
+            {stopConflict && (
+              <div className="notice" role="status">
+                <p>
+                  The saved stops changed. Review the current itinerary above before
+                  saving your edits.
+                </p>
+                <button type="button" onClick={() => setStopDraft(null)}>
+                  Use saved stops
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStopDraft({ base: savedStopKey, stops })}
+                >
+                  Keep my edits
+                </button>
+              </div>
+            )}
+            <button className="btn" disabled={busy || stopConflict}>
               Save stops
             </button>
           </form>
@@ -336,6 +386,7 @@ export function Journey({ s, user }: { s: Shipment; user: User }) {
         s.driverId === user.id &&
         user.role === 'driver' && (
           <form
+            key={`${s.id}:${next.id}`}
             onSubmit={(e) => {
               e.preventDefault();
               const data = new FormData(e.currentTarget);
@@ -412,9 +463,12 @@ export function RecipientTracking({ token }: { token: string }) {
       id: string;
       status: string;
       eta: string | null;
+      arrived?: boolean;
       date: string;
       window: string;
       stopsCompleted: number;
+      redeliveryDate?: string;
+      redeliveryWindow?: string;
       stopsTotal: number;
     } | null>(null),
     [error, setError] = useState('');
@@ -474,7 +528,9 @@ export function RecipientTracking({ token }: { token: string }) {
                     ? 'Delivered'
                     : ['Cancelled', 'Returned', 'Delivery failed'].includes(value.status)
                       ? value.status
-                      : 'ETA pending'}
+                      : value.arrived
+                        ? 'Arrived'
+                        : 'ETA pending'}
               </strong>
               <p>
                 {value.eta
@@ -491,6 +547,14 @@ export function RecipientTracking({ token }: { token: string }) {
                 {value.date} · {value.window}
               </strong>
             </div>
+            {value.redeliveryDate && (
+              <div className="recipient-schedule">
+                <span>Scheduled redelivery</span>
+                <strong>
+                  {value.redeliveryDate} · {value.redeliveryWindow}
+                </strong>
+              </div>
+            )}
             <p>
               {value.stopsCompleted} of {value.stopsTotal} intermediate stops completed
             </p>
@@ -545,14 +609,31 @@ export function OfflinePanel({ user }: { user: User }) {
       await store.refresh(); // Live session + CSRF, never trust a cached identity.
       if (useAppStore.getState().state?.user.id !== user.id) return;
       const session = getSessionRevision();
+      const conflicts = new Map<string, string>();
       for (const entry of pendingActions(user.id)) {
         if (session !== getSessionRevision()) return;
-        await sendDriverAction(entry);
+        if (conflicts.has(entry.id)) continue;
+        try {
+          await sendDriverAction(entry);
+        } catch (error) {
+          if (
+            !(error instanceof ApiError) ||
+            ![400, 403, 404, 409, 422].includes(error.status)
+          )
+            throw error;
+          conflicts.set(entry.id, error.message);
+          continue;
+        }
         if (session !== getSessionRevision()) return;
         discardPending(user.id, entry.requestKey);
       }
       await useAppStore.getState().refresh();
-      setMessage('All saved driver actions synced.');
+      if (session !== getSessionRevision()) return;
+      setMessage(
+        conflicts.size
+          ? `Review saved actions for ${[...conflicts.keys()].join(', ')} before retrying or discarding them. ${conflicts.values().next().value}`
+          : 'All saved driver actions synced.',
+      );
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) await useAppStore.getState().boot();
       setMessage(
@@ -610,6 +691,7 @@ export function OfflinePanel({ user }: { user: User }) {
               <li key={entry.requestKey}>
                 {entry.id}: {entry.action} · {new Date(entry.queuedAt).toLocaleString()}{' '}
                 <button
+                  disabled={syncing}
                   onClick={() => {
                     if (
                       confirm(

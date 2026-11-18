@@ -32,6 +32,7 @@ export type Action =
   | 'requote'
   | 'handover'
   | 'withdrawHandover'
+  | 'withdrawOffer'
   | 'offer'
   | 'resolve'
   | 'change'

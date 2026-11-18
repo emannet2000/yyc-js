@@ -19,6 +19,8 @@ export function eligibleActionDrafts(state: Workspace): string[] {
       if (['Quote ready', 'Ready to assign', 'Offered', 'Assigned'].includes(s.status))
         add('requote');
       if (s.status === 'Ready to assign') add('offer');
+      if (s.status === 'Offered' && s.offeredTo)
+        add('withdrawOffer', `${s.offeredTo}:${s.offerExpiresAt}`);
       if (active && s.driverId)
         add(s.handover && s.offeredTo ? 'withdrawHandover' : 'handover');
       if (s.issue && !s.issue.resolved) add('resolve');

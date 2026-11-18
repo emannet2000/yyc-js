@@ -4,6 +4,7 @@ import { actionDraftKey } from '../actionDrafts';
 
 interface UiState {
   page: string;
+  billingShipmentId: string;
   selected: string | null;
   query: string;
   status: string;
@@ -26,7 +27,7 @@ interface UiState {
     eligibleActions?: string[],
   ) => void;
 
-  setPage: (page: string) => void;
+  setPage: (page: string, billingShipmentId?: string) => void;
   select: (id: string | null) => void;
   close: () => void;
   setQuery: (query: string) => void;
@@ -36,6 +37,7 @@ interface UiState {
 
 export const useUiStore = create<UiState>((set) => ({
   page: 'dashboard',
+  billingShipmentId: '',
   selected: null,
   query: '',
   status: '',
@@ -91,8 +93,8 @@ export const useUiStore = create<UiState>((set) => ({
         : { deliveryDrafts: retained, actionDrafts: retainedActions };
     });
   },
-  setPage(page) {
-    set({ page, query: '', status: '' });
+  setPage(page, billingShipmentId = '') {
+    set({ page, billingShipmentId, query: '', status: '' });
   },
   select(id) {
     set({ selected: id });

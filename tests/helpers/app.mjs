@@ -178,6 +178,14 @@ export async function attachDeliveryEvidence(client, id) {
 // Successful delivery scenarios include the required evidence milestones.
 // Guard/rollback tests use raw requests or an explicit non-success expectation.
 export async function action(client, id, actionName, data = {}, expected = 200) {
+  if (actionName === 'pickup' && expected === 200) {
+    const current = (await client('/api/state')).value.shipments.find((s) => s.id === id);
+    if (!current.arrivedAt) await action(client, id, 'arrival');
+  }
+  if (actionName === 'confirmReturn' && expected === 200) {
+    const current = (await client('/api/state')).value.shipments.find((s) => s.id === id);
+    if (!current.arrivedAt) await action(client, id, 'arrival');
+  }
   if (actionName === 'deliver' && expected === 200) {
     const current = (await client('/api/state')).value.shipments.find((s) => s.id === id);
     if (!current.arrivedAt) await action(client, id, 'arrival');

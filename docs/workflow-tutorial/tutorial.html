@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YYC Brokers — Basic Delivery Workflow Tutorial</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
+  :root {
+    --ink: #1d2733; --muted: #5b6878; --line: #d7dee8; --paper: #ffffff;
+    --brand: #1f5fae; --brand-soft: #e6f0fb; --amber: #b7791f; --amber-soft: #fdf3e1;
+    --green: #237a4b; --green-soft: #e4f4ea; --red: #b42318; --red-soft: #fde8e6;
+    --grey-soft: #f1f4f8;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "DejaVu Sans", Arial, Helvetica, sans-serif; color: var(--ink); font-size: 11.5pt; line-height: 1.5; margin: 0; background: var(--paper); }
+  h1 { font-size: 27pt; margin: 0 0 6pt; color: var(--brand); letter-spacing: -0.3pt; }
+  h2 { font-size: 16pt; margin: 18pt 0 6pt; color: var(--ink); border-bottom: 2px solid var(--brand-soft); padding-bottom: 3pt; }
+  h3 { font-size: 12.5pt; margin: 12pt 0 4pt; color: var(--brand); }
+  p { margin: 5pt 0; }
+  .eyebrow { text-transform: uppercase; letter-spacing: 1.5pt; font-size: 9pt; color: var(--muted); font-weight: bold; }
+  .lead { font-size: 13pt; color: var(--muted); margin-top: 4pt; }
+  .cover { border-radius: 10pt; background: linear-gradient(135deg, #1f5fae 0%, #2f7fd0 60%, #46a0e0 100%); color: #fff; padding: 34pt 30pt; margin-bottom: 16pt; }
+  .cover h1 { color: #fff; font-size: 30pt; }
+  .cover .eyebrow { color: #d6e8fb; }
+  .cover .lead { color: #e8f2fd; }
+  .page-break { break-before: page; page-break-before: always; }
+  figure { margin: 12pt 0; break-inside: avoid; page-break-inside: avoid; }
+  figure svg { width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 8pt; background: #fbfcfe; }
+  figcaption { font-size: 9.5pt; color: var(--muted); margin-top: 4pt; }
+  .box { border-left: 4px solid var(--brand); background: var(--brand-soft); padding: 8pt 11pt; border-radius: 4pt; margin: 10pt 0; break-inside: avoid; }
+  .box.warn { border-color: var(--amber); background: var(--amber-soft); }
+  .box.ok { border-color: var(--green); background: var(--green-soft); }
+  .box strong { color: var(--ink); }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0; font-size: 9.8pt; break-inside: avoid; }
+  th, td { text-align: left; padding: 3pt 6pt; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--grey-soft); font-size: 10pt; }
+  .step { display: flex; gap: 10pt; margin: 10pt 0; break-inside: avoid; }
+  .num { flex: 0 0 26pt; height: 26pt; border-radius: 13pt; background: var(--brand); color: #fff; font-weight: bold; text-align: center; line-height: 26pt; font-size: 11pt; }
+  .step p { margin: 2pt 0; }
+  .who { display: inline-block; font-size: 9pt; font-weight: bold; padding: 1pt 7pt; border-radius: 8pt; background: var(--grey-soft); color: var(--ink); border: 1px solid var(--line); }
+  .pill { display: inline-block; font-size: 9.5pt; padding: 1pt 8pt; border-radius: 9pt; background: var(--grey-soft); border: 1px solid var(--line); font-weight: bold; }
+  .toc li { margin: 4pt 0; }
+  ul { margin: 4pt 0 4pt 16pt; padding: 0; }
+  li { margin: 2pt 0; }
+  .small { font-size: 9.5pt; color: var(--muted); }
+  code { font-family: "DejaVu Sans Mono", monospace; font-size: 10pt; background: var(--grey-soft); padding: 0 3pt; border-radius: 2pt; }
+  footer.note { margin-top: 14pt; font-size: 9pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 6pt; }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <div class="eyebrow">YYC Brokers · Getting started</div>
+  <h1>Delivery Workflow Tutorial</h1>
+  <div class="lead">A basic, step-by-step guide to moving a delivery from request to payment-ready completion, for store owners, brokers and drivers.</div>
+</div>
+
+<h2>What this guide covers</h2>
+<ol class="toc">
+  <li>The three roles and what each one does</li>
+  <li>The delivery lifecycle at a glance</li>
+  <li>Step 1 — Store owner requests a delivery</li>
+  <li>Step 2 — Broker prices the job and the store accepts</li>
+  <li>Step 3 — Broker offers the job to a driver</li>
+  <li>Step 4 — Driver accepts, collects and delivers</li>
+  <li>Step 5 — Broker closes the job and invoices it</li>
+  <li>Exceptions, changes and handovers (quick reference)</li>
+  <li>Quick reference: statuses and key rules</li>
+</ol>
+
+<p class="small">Terms in <span class="pill">pill</span> form are the labels you will see in the app. Amounts are in Canadian dollars (CAD).</p>
+
+<!-- ROLES -->
+<div class="page-break"></div>
+<h2>1. The three roles</h2>
+<p>Every delivery passes through three people. Each one only sees what they need to do their part.</p>
+
+<figure>
+<svg viewBox="0 0 700 300" role="img" aria-label="Three roles: Store owner, Broker, Driver">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1f5fae"/></marker>
+  </defs>
+  <!-- Store -->
+  <rect x="20" y="40" width="190" height="200" rx="12" fill="#ffffff" stroke="#1f5fae" stroke-width="2"/>
+  <rect x="20" y="40" width="190" height="42" rx="12" fill="#1f5fae"/>
+  <text x="115" y="67" text-anchor="middle" font-size="17" font-weight="bold" fill="#fff">STORE OWNER</text>
+  <text x="36" y="110" font-size="13" fill="#1d2733">• Requests a delivery</text>
+  <text x="36" y="135" font-size="13" fill="#1d2733">• Reviews the quotation</text>
+  <text x="36" y="160" font-size="13" fill="#1d2733">• Accepts the price</text>
+  <text x="36" y="185" font-size="13" fill="#1d2733">• Can request changes</text>
+  <text x="36" y="222" font-size="11" fill="#5b6878">Sees: customer price only</text>
+
+  <!-- Broker -->
+  <rect x="255" y="40" width="190" height="200" rx="12" fill="#ffffff" stroke="#237a4b" stroke-width="2"/>
+  <rect x="255" y="40" width="190" height="42" rx="12" fill="#237a4b"/>
+  <text x="350" y="67" text-anchor="middle" font-size="17" font-weight="bold" fill="#fff">BROKER</text>
+  <text x="271" y="110" font-size="13" fill="#1d2733">• Prices the job</text>
+  <text x="271" y="135" font-size="13" fill="#1d2733">• Approves drivers</text>
+  <text x="271" y="160" font-size="13" fill="#1d2733">• Sends job offers</text>
+  <text x="271" y="185" font-size="13" fill="#1d2733">• Resolves issues</text>
+  <text x="271" y="222" font-size="11" fill="#5b6878">Sees: customer price + driver rate</text>
+
+  <!-- Driver -->
+  <rect x="490" y="40" width="190" height="200" rx="12" fill="#ffffff" stroke="#b7791f" stroke-width="2"/>
+  <rect x="490" y="40" width="190" height="42" rx="12" fill="#b7791f"/>
+  <text x="585" y="67" text-anchor="middle" font-size="17" font-weight="bold" fill="#fff">DRIVER</text>
+  <text x="506" y="110" font-size="13" fill="#1d2733">• Accepts or declines</text>
+  <text x="506" y="135" font-size="13" fill="#1d2733">• Records arrival</text>
+  <text x="506" y="160" font-size="13" fill="#1d2733">• Confirms pickup</text>
+  <text x="506" y="185" font-size="13" fill="#1d2733">• Uploads proof, delivers</text>
+  <text x="506" y="222" font-size="11" fill="#5b6878">Sees: own offers and rate</text>
+
+  <!-- arrows -->
+  <line x1="212" y1="140" x2="252" y2="140" stroke="#1f5fae" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="448" y1="140" x2="488" y2="140" stroke="#1f5fae" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="232" y="128" text-anchor="middle" font-size="10" fill="#5b6878">request</text>
+  <text x="468" y="128" text-anchor="middle" font-size="10" fill="#5b6878">offer</text>
+  <text x="350" y="275" text-anchor="middle" font-size="12" fill="#5b6878">The broker sits in the middle: every price, approval and assignment passes through them.</text>
+</svg>
+<figcaption>Figure 1. Work flows from the store to the broker and then to the driver. Money-facing details stay separated by role.</figcaption>
+</figure>
+
+<div class="box">
+  <strong>Before anyone can work:</strong> the first broker account is created once, by the operator, using a one-time setup token. Drivers register and wait for broker approval before they can accept jobs. Their truck is approved separately.
+</div>
+
+<!-- LIFECYCLE -->
+<div class="page-break"></div>
+<h2>2. The delivery lifecycle at a glance</h2>
+<p>A delivery has a <span class="pill">status</span> that tells everyone what happens next. The main path is shown below; side paths follow.</p>
+
+<figure>
+<svg viewBox="0 0 700 430" role="img" aria-label="Main delivery status flow">
+  <defs>
+    <marker id="a2" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5b6878"/></marker>
+  </defs>
+  <!-- Row 1 -->
+  <g>
+    <rect x="20" y="30" width="140" height="62" rx="10" fill="#e6f0fb" stroke="#1f5fae" stroke-width="2"/>
+    <text x="90" y="56" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Awaiting quote</text>
+    <text x="90" y="75" text-anchor="middle" font-size="10.5" fill="#5b6878">Store request</text>
+  </g>
+  <line x1="162" y1="61" x2="186" y2="61" stroke="#5b6878" stroke-width="2" marker-end="url(#a2)"/>
+  <g>
+    <rect x="190" y="30" width="140" height="62" rx="10" fill="#e6f0fb" stroke="#1f5fae" stroke-width="2"/>
+    <text x="260" y="56" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Quote ready</text>
+    <text x="260" y="75" text-anchor="middle" font-size="10.5" fill="#5b6878">Broker priced it</text>
+  </g>
+  <line x1="332" y1="61" x2="356" y2="61" stroke="#5b6878" stroke-width="2" marker-end="url(#a2)"/>
+  <g>
+    <rect x="360" y="30" width="140" height="62" rx="10" fill="#e6f0fb" stroke="#1f5fae" stroke-width="2"/>
+    <text x="430" y="56" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Ready to assign</text>
+    <text x="430" y="75" text-anchor="middle" font-size="10.5" fill="#5b6878">Store accepted</text>
+  </g>
+  <line x1="502" y1="61" x2="526" y2="61" stroke="#5b6878" stroke-width="2" marker-end="url(#a2)"/>
+  <g>
+    <rect x="530" y="30" width="150" height="62" rx="10" fill="#fdf3e1" stroke="#b7791f" stroke-width="2"/>
+    <text x="605" y="56" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Offered</text>
+    <text x="605" y="75" text-anchor="middle" font-size="10.5" fill="#5b6878">Waiting for driver</text>
+  </g>
+
+  <!-- down arrow from Offered to Assigned -->
+  <line x1="605" y1="96" x2="605" y2="140" stroke="#5b6878" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="614" y="122" font-size="10.5" fill="#5b6878">driver accepts</text>
+
+  <!-- Row 2 (right to left) -->
+  <g>
+    <rect x="530" y="144" width="150" height="62" rx="10" fill="#e4f4ea" stroke="#237a4b" stroke-width="2"/>
+    <text x="605" y="170" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Assigned</text>
+    <text x="605" y="189" text-anchor="middle" font-size="10.5" fill="#5b6878">Driver responsible</text>
+  </g>
+  <line x1="530" y1="175" x2="506" y2="175" stroke="#5b6878" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="518" y="166" text-anchor="middle" font-size="10" fill="#5b6878">pickup</text>
+  <g>
+    <rect x="360" y="144" width="140" height="62" rx="10" fill="#e4f4ea" stroke="#237a4b" stroke-width="2"/>
+    <text x="430" y="170" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">In transit</text>
+    <text x="430" y="189" text-anchor="middle" font-size="10.5" fill="#5b6878">Cargo on the truck</text>
+  </g>
+  <line x1="360" y1="175" x2="336" y2="175" stroke="#5b6878" stroke-width="2" marker-end="url(#a2)"/>
+  <g>
+    <rect x="190" y="144" width="140" height="62" rx="10" fill="#e4f4ea" stroke="#237a4b" stroke-width="2"/>
+    <text x="260" y="170" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Delivered</text>
+    <text x="260" y="189" text-anchor="middle" font-size="10.5" fill="#5b6878">Proof recorded</text>
+  </g>
+  <line x1="190" y1="175" x2="166" y2="175" stroke="#5b6878" stroke-width="2" marker-end="url(#a2)"/>
+  <g>
+    <rect x="20" y="144" width="140" height="62" rx="10" fill="#f1f4f8" stroke="#5b6878" stroke-width="2"/>
+    <text x="90" y="170" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Invoice</text>
+    <text x="90" y="189" text-anchor="middle" font-size="10.5" fill="#5b6878">Broker bills it</text>
+  </g>
+
+  <!-- side branches -->
+  <text x="20" y="250" font-size="13" font-weight="bold" fill="#5b6878">Side paths</text>
+  <line x1="20" y1="256" x2="680" y2="256" stroke="#d7dee8" stroke-width="1.5"/>
+
+  <g>
+    <rect x="20" y="276" width="170" height="56" rx="10" fill="#fde8e6" stroke="#b42318" stroke-width="2"/>
+    <text x="105" y="300" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Delivery failed</text>
+    <text x="105" y="318" text-anchor="middle" font-size="10.5" fill="#5b6878">Broker: redeliver or return</text>
+  </g>
+  <g>
+    <rect x="215" y="276" width="170" height="56" rx="10" fill="#fdf3e1" stroke="#b7791f" stroke-width="2"/>
+    <text x="300" y="300" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Returning → Returned</text>
+    <text x="300" y="318" text-anchor="middle" font-size="10.5" fill="#5b6878">Cargo goes back to pickup</text>
+  </g>
+  <g>
+    <rect x="410" y="276" width="270" height="56" rx="10" fill="#f1f4f8" stroke="#5b6878" stroke-width="2"/>
+    <text x="545" y="300" text-anchor="middle" font-size="13" font-weight="bold" fill="#1d2733">Cancelled</text>
+    <text x="545" y="318" text-anchor="middle" font-size="10.5" fill="#5b6878">Owner request or broker cancel</text>
+  </g>
+  <text x="20" y="362" font-size="11.5" fill="#5b6878">Open issue: an unresolved exception blocks progress until the broker records a resolution.</text>
+  <text x="20" y="382" font-size="11.5" fill="#5b6878">Driver handover: the broker offers the job to a replacement driver; the first driver stays</text>
+  <text x="20" y="400" font-size="11.5" fill="#5b6878">responsible until the replacement accepts.</text>
+</svg>
+<figcaption>Figure 2. Status flow. Only the broker and driver move the job forward; the store moves it only by accepting the quote or submitting requests.</figcaption>
+</figure>
+
+<div class="box ok">
+  <strong>Rule of thumb:</strong> each status is a commitment. <em>Quote ready</em> = a price is offered. <em>Ready to assign</em> = the customer agreed. <em>Assigned</em> = a driver accepted. <em>In transit</em> = the driver has the cargo.
+</div>
+
+<!-- STEP 1 -->
+<div class="page-break"></div>
+<h2>3. Step 1 — The store owner requests a delivery</h2>
+<p><span class="who">Store owner</span> &nbsp; Starting status: <span class="pill">Awaiting quote</span></p>
+
+<figure>
+<svg viewBox="0 0 700 420" role="img" aria-label="Delivery request form mockup">
+  <rect x="10" y="10" width="680" height="400" rx="10" fill="#ffffff" stroke="#d7dee8"/>
+  <rect x="10" y="10" width="680" height="40" rx="10" fill="#1f5fae"/>
+  <rect x="10" y="40" width="680" height="10" fill="#1f5fae"/>
+  <text x="30" y="36" font-size="15" font-weight="bold" fill="#fff">New delivery request</text>
+
+  <!-- fields -->
+  <text x="30" y="78" font-size="11" fill="#5b6878">Pickup address</text>
+  <rect x="30" y="84" width="300" height="30" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="40" y="104" font-size="12" fill="#1d2733">Warehouse, 12 Industrial Rd</text>
+
+  <text x="370" y="78" font-size="11" fill="#5b6878">Delivery address</text>
+  <rect x="370" y="84" width="300" height="30" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="380" y="104" font-size="12" fill="#1d2733">Store 7, 88 Main St</text>
+
+  <text x="30" y="142" font-size="11" fill="#5b6878">Pickup date</text>
+  <rect x="30" y="148" width="140" height="30" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="40" y="168" font-size="12" fill="#1d2733">2026-12-03</text>
+  <text x="190" y="142" font-size="11" fill="#5b6878">Pickup window</text>
+  <rect x="190" y="148" width="140" height="30" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="200" y="168" font-size="12" fill="#1d2733">Morning</text>
+  <text x="370" y="142" font-size="11" fill="#5b6878">Vehicle type</text>
+  <rect x="370" y="148" width="140" height="30" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="380" y="168" font-size="12" fill="#1d2733">Box truck</text>
+  <text x="530" y="142" font-size="11" fill="#5b6878">Weight (kg)</text>
+  <rect x="530" y="148" width="140" height="30" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="540" y="168" font-size="12" fill="#1d2733">900</text>
+
+  <text x="30" y="206" font-size="11" fill="#5b6878">Goods / cargo</text>
+  <rect x="30" y="212" width="140" height="30" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="40" y="232" font-size="12" fill="#1d2733">Dry goods</text>
+  <text x="190" y="206" font-size="11" fill="#5b6878">Pallet count</text>
+  <rect x="190" y="212" width="140" height="30" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="200" y="232" font-size="12" fill="#1d2733">4</text>
+  <text x="370" y="206" font-size="11" fill="#5b6878">Receiving hours</text>
+  <rect x="370" y="212" width="300" height="30" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="380" y="232" font-size="12" fill="#1d2733">Mon–Fri 08:00–16:00, dock 2</text>
+
+  <text x="30" y="270" font-size="11" fill="#5b6878">Unloading requirements</text>
+  <rect x="30" y="276" width="640" height="26" rx="5" fill="#fff" stroke="#b8c4d3"/>
+  <text x="40" y="294" font-size="12" fill="#1d2733">Liftgate required at receiving dock</text>
+
+  <rect x="30" y="322" width="640" height="26" rx="13" fill="#f1f4f8" stroke="#d7dee8"/>
+  <text x="46" y="340" font-size="11" fill="#5b6878">Optional delivery deadline (Edmonton time): 2026-12-04 17:00</text>
+
+  <!-- submit -->
+  <rect x="470" y="362" width="200" height="34" rx="17" fill="#1f5fae"/>
+  <text x="570" y="384" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">Submit delivery request</text>
+
+  <!-- callout -->
+  <circle cx="22" cy="20" r="0"/>
+</svg>
+<figcaption>Figure 3. Example request: 4 pallets, 900 kg, a box truck with a liftgate, delivered to a store dock.</figcaption>
+</figure>
+
+<div class="step"><div class="num">1</div><div><p><strong>Open the form.</strong> From your workspace, choose a new delivery request.</p></div></div>
+<div class="step"><div class="num">2</div><div><p><strong>Describe the work.</strong> Enter both addresses, the pickup date and window, the cargo, weight and pallets.</p></div></div>
+<div class="step"><div class="num">3</div><div><p><strong>Add handling details.</strong> Pick the vehicle type and unloading equipment, plus pickup and receiving contacts, hours and any appointment reference.</p></div></div>
+<div class="step"><div class="num">4</div><div><p><strong>Submit.</strong> The delivery appears as <span class="pill">Awaiting quote</span>. This does <em>not</em> mean a price is agreed or a driver is booked.</p></div></div>
+
+<div class="box warn">
+  <strong>Tip:</strong> clear addresses, correct weight and complete receiving instructions speed up quoting. Incorrect figures are the most common cause of a delayed quote.
+</div>
+
+<!-- STEP 2 -->
+<div class="page-break"></div>
+<h2>4. Step 2 — The broker prices the job; the store accepts</h2>
+<p><span class="who">Broker</span> then <span class="who">Store owner</span> &nbsp; <span class="pill">Awaiting quote</span> → <span class="pill">Quote ready</span> → <span class="pill">Ready to assign</span></p>
+
+<figure>
+<svg viewBox="0 0 700 330" role="img" aria-label="Quotation panel with customer price and driver rate">
+  <rect x="10" y="10" width="680" height="310" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <text x="30" y="42" font-size="14" font-weight="bold" fill="#1d2733">Prepare quotation · DEL-0042</text>
+  <text x="30" y="62" font-size="11" fill="#5b6878">Review cargo, route and schedule, then enter both amounts.</text>
+
+  <rect x="30" y="80" width="300" height="110" rx="8" fill="#e6f0fb" stroke="#1f5fae" stroke-width="1.5"/>
+  <text x="46" y="106" font-size="11" font-weight="bold" fill="#1f5fae">CUSTOMER PRICE (store sees this)</text>
+  <text x="46" y="150" font-size="30" font-weight="bold" fill="#1d2733">$485.00</text>
+  <text x="46" y="174" font-size="11" fill="#5b6878">Store must accept this version</text>
+
+  <rect x="370" y="80" width="300" height="110" rx="8" fill="#fdf3e1" stroke="#b7791f" stroke-width="1.5"/>
+  <text x="386" y="106" font-size="11" font-weight="bold" fill="#b7791f">DRIVER RATE (broker and driver)</text>
+  <text x="386" y="150" font-size="30" font-weight="bold" fill="#1d2733">$360.00</text>
+  <text x="386" y="174" font-size="11" fill="#5b6878">Hidden from the store owner</text>
+
+  <rect x="30" y="206" width="640" height="34" rx="17" fill="#e4f4ea"/>
+  <text x="46" y="228" font-size="12" fill="#1d2733">Quote is valid for 48 hours. Expired quotes must be re-issued.</text>
+
+  <rect x="470" y="256" width="200" height="34" rx="17" fill="#237a4b"/>
+  <text x="570" y="278" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">Issue quotation</text>
+  <rect x="30" y="256" width="200" height="34" rx="17" fill="#fff" stroke="#b8c4d3"/>
+  <text x="130" y="278" text-anchor="middle" font-size="12" fill="#5b6878">Cancel delivery</text>
+</svg>
+<figcaption>Figure 4. The broker enters two separate amounts. Their purposes are different and they are never shown to the other party.</figcaption>
+</figure>
+
+<h3>Broker actions</h3>
+<div class="step"><div class="num">1</div><div><p>Open the delivery and select <strong>Prepare a quotation</strong>.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>Enter the <strong>Customer quote (CAD)</strong> and the <strong>Driver rate (CAD)</strong>.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>Select <strong>Issue quotation</strong>. The delivery moves to <span class="pill">Quote ready</span>.</p></div></div>
+
+<h3>Store owner actions</h3>
+<div class="step"><div class="num">4</div><div><p>Review the price together with the shipment details, then select <strong>Accept quotation</strong>.</p>
+<p class="small">Acceptance applies only to the current version. It moves the job to <span class="pill">Ready to assign</span> and does not charge anything.</p></div></div>
+
+<div class="box warn">
+  <strong>Disagree with the price or the details?</strong> Do not accept. Submit an <em>Owner request</em> (quotation review, change of destination/cargo, or cancellation) so the broker can respond.
+</div>
+
+<!-- STEP 3 -->
+<div class="page-break"></div>
+<h2>5. Step 3 — The broker offers the job to a driver</h2>
+<p><span class="who">Broker</span> &nbsp; <span class="pill">Ready to assign</span> → <span class="pill">Offered</span></p>
+
+<figure>
+<svg viewBox="0 0 700 390" role="img" aria-label="Dispatch readiness checklist showing suitable and unsuitable drivers">
+  <rect x="10" y="10" width="680" height="370" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <text x="30" y="42" font-size="14" font-weight="bold" fill="#1d2733">Select a driver · DEL-0042</text>
+  <text x="30" y="62" font-size="11" fill="#5b6878">Needs: 900 kg · 4 pallets · box truck · liftgate · Dec 3 morning</text>
+
+  <!-- driver A -->
+  <rect x="30" y="80" width="640" height="78" rx="8" fill="#e4f4ea" stroke="#237a4b" stroke-width="1.5"/>
+  <circle cx="60" cy="119" r="16" fill="#237a4b"/>
+  <text x="60" y="124" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff">✓</text>
+  <text x="90" y="110" font-size="14" font-weight="bold" fill="#1d2733">Driver A — Approved</text>
+  <text x="90" y="130" font-size="11.5" fill="#1d2733">Truck: 1,500 kg · 8 pallets · liftgate · approved · service area OK</text>
+  <text x="90" y="148" font-size="11.5" fill="#237a4b" font-weight="bold">Available · meets truck and schedule requirements</text>
+  <rect x="520" y="104" width="130" height="36" rx="18" fill="#237a4b"/>
+  <text x="585" y="127" text-anchor="middle" font-size="12" font-weight="bold" fill="#fff">Select</text>
+
+  <!-- driver B -->
+  <rect x="30" y="170" width="640" height="78" rx="8" fill="#fde8e6" stroke="#b42318" stroke-width="1.5"/>
+  <circle cx="60" cy="209" r="16" fill="#b42318"/>
+  <text x="60" y="215" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff">✕</text>
+  <text x="90" y="200" font-size="14" font-weight="bold" fill="#1d2733">Driver B — Approved</text>
+  <text x="90" y="220" font-size="11.5" fill="#1d2733">Truck: 500 kg · 6 pallets · no liftgate</text>
+  <text x="90" y="238" font-size="11.5" fill="#b42318" font-weight="bold">Blocked: capacity too low for 900 kg · no liftgate</text>
+  <rect x="520" y="194" width="130" height="36" rx="18" fill="#f1f4f8" stroke="#b8c4d3"/>
+  <text x="585" y="217" text-anchor="middle" font-size="12" fill="#5b6878">Not available</text>
+
+  <!-- driver C -->
+  <rect x="30" y="260" width="640" height="78" rx="8" fill="#fdf3e1" stroke="#b7791f" stroke-width="1.5"/>
+  <circle cx="60" cy="299" r="16" fill="#b7791f"/>
+  <text x="60" y="305" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff">!</text>
+  <text x="90" y="290" font-size="14" font-weight="bold" fill="#1d2733">Driver C — Pending approval</text>
+  <text x="90" y="310" font-size="11.5" fill="#1d2733">Truck: 1,200 kg · 8 pallets · liftgate</text>
+  <text x="90" y="328" font-size="11.5" fill="#b7791f" font-weight="bold">Blocked until the broker approves the driver and truck</text>
+  <rect x="520" y="284" width="130" height="36" rx="18" fill="#f1f4f8" stroke="#b8c4d3"/>
+  <text x="585" y="307" text-anchor="middle" font-size="12" fill="#5b6878">Not available</text>
+</svg>
+<figcaption>Figure 5. The app lists every driver with a reason when they are not suitable. Only Driver A can be offered this job.</figcaption>
+</figure>
+
+<div class="step"><div class="num">1</div><div><p>Select <strong>Send job offer</strong>. Open <em>Review driver availability</em> to see why each driver is or is not suitable.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>Choose an approved, suitable and available driver and send the offer. The delivery moves to <span class="pill">Offered</span>.</p></div></div>
+
+<div class="box">
+  <strong>Offers expire after one hour</strong> if the driver does not respond. A sent offer is not yet a confirmed job; only the driver's acceptance is.
+</div>
+
+<!-- STEP 4 -->
+<div class="page-break"></div>
+<h2>6. Step 4 — The driver accepts, collects and delivers</h2>
+<p><span class="who">Driver</span> &nbsp; <span class="pill">Offered</span> → <span class="pill">Assigned</span> → <span class="pill">In transit</span> → <span class="pill">Delivered</span></p>
+
+<figure>
+<svg viewBox="0 0 700 330" role="img" aria-label="Driver job offer panel">
+  <rect x="10" y="10" width="680" height="310" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <rect x="10" y="10" width="680" height="44" rx="10" fill="#b7791f"/>
+  <rect x="10" y="44" width="680" height="10" fill="#b7791f"/>
+  <text x="30" y="38" font-size="14" font-weight="bold" fill="#fff">New job offer · DEL-0042 · expires in 1 hour</text>
+
+  <text x="30" y="84" font-size="12" fill="#1d2733"><tspan font-weight="bold">Pickup:</tspan> Warehouse, 12 Industrial Rd · Dec 3, morning</text>
+  <text x="30" y="106" font-size="12" fill="#1d2733"><tspan font-weight="bold">Drop-off:</tspan> Store 7, 88 Main St · Mon–Fri 08:00–16:00</text>
+  <text x="30" y="128" font-size="12" fill="#1d2733"><tspan font-weight="bold">Cargo:</tspan> 4 pallets · 900 kg · liftgate needed</text>
+
+  <rect x="30" y="146" width="640" height="56" rx="8" fill="#fdf3e1" stroke="#b7791f"/>
+  <text x="46" y="170" font-size="12" fill="#1d2733">Your agreed rate: <tspan font-size="18" font-weight="bold">$360.00</tspan></text>
+  <text x="46" y="190" font-size="11" fill="#5b6878">The customer price is not shown to drivers.</text>
+
+  <rect x="30" y="218" width="300" height="46" rx="23" fill="#237a4b"/>
+  <text x="180" y="246" text-anchor="middle" font-size="14" font-weight="bold" fill="#fff">Accept job</text>
+  <rect x="350" y="218" width="320" height="46" rx="23" fill="#fff" stroke="#b42318" stroke-width="1.5"/>
+  <text x="510" y="246" text-anchor="middle" font-size="14" font-weight="bold" fill="#b42318">Decline offer</text>
+  <text x="30" y="290" font-size="11" fill="#5b6878">Accepting makes you responsible for this job. Declining releases it to the broker.</text>
+</svg>
+<figcaption>Figure 6. The driver's decision. Acceptance is the moment responsibility transfers.</figcaption>
+</figure>
+
+<h3>Driver actions — collect the cargo</h3>
+<div class="step"><div class="num">1</div><div><p>Select <strong>Accept job</strong>. The status becomes <span class="pill">Assigned</span>.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>When you reach the pickup, select <strong>Record arrival</strong>.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>After loading, select <strong>Confirm pickup</strong>. The status becomes <span class="pill">In transit</span> and you now hold responsibility for the load.</p></div></div>
+
+<div class="box warn">
+  <strong>Cargo missing or damaged?</strong> Do not confirm pickup. Report an exception instead. An open exception blocks pickup and delivery until the broker records a resolution.
+</div>
+
+<!-- DELIVERY -->
+<div class="page-break"></div>
+<h3>Driver actions — deliver and prove it</h3>
+<figure>
+<svg viewBox="0 0 700 330" role="img" aria-label="Delivery completion checklist">
+  <rect x="10" y="10" width="680" height="310" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <text x="30" y="42" font-size="14" font-weight="bold" fill="#1d2733">Confirm delivery · DEL-0042</text>
+
+  <!-- checklist -->
+  <g font-size="12.5" fill="#1d2733">
+    <rect x="30" y="58" width="16" height="16" rx="3" fill="#237a4b"/><text x="38" y="71" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">✓</text>
+    <text x="58" y="72">All intermediate stops completed</text>
+    <rect x="30" y="84" width="16" height="16" rx="3" fill="#237a4b"/><text x="38" y="97" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">✓</text>
+    <text x="58" y="98">Arrival recorded at the final destination</text>
+    <rect x="30" y="110" width="16" height="16" rx="3" fill="#237a4b"/><text x="38" y="123" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">✓</text>
+    <text x="58" y="124">No open exception</text>
+    <rect x="30" y="136" width="16" height="16" rx="3" fill="#237a4b"/><text x="38" y="149" text-anchor="middle" font-size="12" fill="#fff" font-weight="bold">✓</text>
+    <text x="58" y="150">Proof uploaded after arrival</text>
+    <rect x="30" y="162" width="16" height="16" rx="3" fill="#fff" stroke="#b42318" stroke-width="1.5"/>
+    <text x="58" y="176">Receipt reference entered</text>
+    <rect x="30" y="188" width="16" height="16" rx="3" fill="#fff" stroke="#b42318" stroke-width="1.5"/>
+    <text x="58" y="202">Recipient name entered</text>
+  </g>
+
+  <!-- phone-like upload tile -->
+  <rect x="400" y="58" width="270" height="150" rx="8" fill="#f1f4f8" stroke="#b8c4d3" stroke-dasharray="5 4"/>
+  <text x="535" y="110" text-anchor="middle" font-size="13" font-weight="bold" fill="#1f5fae">Evidence file</text>
+  <text x="535" y="132" text-anchor="middle" font-size="11" fill="#5b6878">Delivery photo, signature</text>
+  <text x="535" y="150" text-anchor="middle" font-size="11" fill="#5b6878">or receipt document</text>
+  <text x="535" y="162" text-anchor="middle" font-size="10" fill="#5b6878">PNG, JPEG or PDF, max 2 MiB</text>
+  <rect x="455" y="176" width="160" height="26" rx="13" fill="#1f5fae"/>
+  <text x="535" y="193" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="bold">Choose file</text>
+
+  <rect x="30" y="232" width="640" height="48" rx="8" fill="#e4f4ea" stroke="#237a4b"/>
+  <text x="46" y="252" font-size="12" fill="#1d2733">Once all boxes are ticked, select <tspan font-weight="bold">Confirm delivery</tspan>.</text>
+  <text x="46" y="270" font-size="11" fill="#5b6878">The delivery becomes Delivered and the proof is stored with a hash, time and your name.</text>
+</svg>
+<figcaption>Figure 7. Delivery completion requires every item. A typed name or filename alone is not accepted.</figcaption>
+</figure>
+
+<div class="box warn">
+  <strong>Proof must be fresh.</strong> A photo taken or uploaded before pickup does not count. Upload the proof after you arrive at the final destination.
+</div>
+
+<!-- STEP 5 -->
+<div class="page-break"></div>
+<h2>7. Step 5 — The broker closes the job and invoices it</h2>
+<p><span class="who">Broker</span> &nbsp; <span class="pill">Delivered</span> or <span class="pill">Returned</span> → invoice issued</p>
+
+<figure>
+<svg viewBox="0 0 700 300" role="img" aria-label="Billing: invoice and payment ledger separated">
+  <rect x="10" y="10" width="680" height="280" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <!-- invoice -->
+  <rect x="30" y="34" width="290" height="200" rx="8" fill="#e6f0fb" stroke="#1f5fae" stroke-width="1.5"/>
+  <text x="45" y="60" font-size="13" font-weight="bold" fill="#1f5fae">1. Issue invoice</text>
+  <text x="45" y="84" font-size="11.5" fill="#1d2733">Customer: Store 7</text>
+  <text x="45" y="104" font-size="11.5" fill="#1d2733">Job: DEL-0042 · Delivered</text>
+  <text x="45" y="124" font-size="11.5" fill="#1d2733">Amount: $485.00 CAD</text>
+  <rect x="45" y="150" width="260" height="60" rx="6" fill="#fff" stroke="#b8c4d3"/>
+  <text x="58" y="174" font-size="11" fill="#5b6878">Customer billing record</text>
+  <text x="58" y="196" font-size="11" fill="#5b6878">Payments and refunds are logged here</text>
+
+  <!-- ledger -->
+  <rect x="380" y="34" width="290" height="200" rx="8" fill="#e4f4ea" stroke="#237a4b" stroke-width="1.5"/>
+  <text x="395" y="60" font-size="13" font-weight="bold" fill="#237a4b">2. Record verified transactions</text>
+  <text x="395" y="84" font-size="11.5" fill="#1d2733">• Customer payment (received)</text>
+  <text x="395" y="104" font-size="11.5" fill="#1d2733">• Refund or adjustment</text>
+  <text x="395" y="124" font-size="11.5" fill="#1d2733">• Driver payout (per driver share)</text>
+  <rect x="395" y="150" width="260" height="60" rx="6" fill="#fff" stroke="#b8c4d3"/>
+  <text x="408" y="174" font-size="11" fill="#5b6878">Record only after checking your bank</text>
+  <text x="408" y="196" font-size="11" fill="#5b6878">or payment process. The app is a ledger.</text>
+
+  <text x="350" y="262" text-anchor="middle" font-size="12" fill="#b42318" font-weight="bold">A completed delivery does not mean the customer has paid.</text>
+  <text x="350" y="282" text-anchor="middle" font-size="11.5" fill="#5b6878">The app does not move money or charge cards; it records what happened outside it.</text>
+</svg>
+<figcaption>Figure 8. Invoicing and payment recording are separate, so reconcile them against your real payment records.</figcaption>
+</figure>
+
+<div class="step"><div class="num">1</div><div><p>Find the completed delivery under <strong>Action required</strong> (or open it) and select <strong>Open invoice form</strong> to issue the customer invoice.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>Record payments, refunds or payouts with a reference that matches your external records.</p></div></div>
+
+<!-- EXCEPTIONS -->
+<div class="page-break"></div>
+<h2>8. Exceptions, changes and handovers (quick reference)</h2>
+<p>Most deliveries follow the main path. These are the common detours.</p>
+
+<figure>
+<svg viewBox="0 0 700 360" role="img" aria-label="Decision guide for exceptions and changes">
+  <defs>
+    <marker id="a3" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5b6878"/></marker>
+  </defs>
+  <rect x="10" y="10" width="680" height="340" rx="10" fill="#fff" stroke="#d7dee8"/>
+
+  <!-- start -->
+  <rect x="250" y="28" width="200" height="40" rx="20" fill="#1f5fae"/>
+  <text x="350" y="53" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">Something goes wrong?</text>
+
+  <line x1="300" y1="68" x2="130" y2="108" stroke="#5b6878" stroke-width="2" marker-end="url(#a3)"/>
+  <line x1="350" y1="68" x2="350" y2="108" stroke="#5b6878" stroke-width="2" marker-end="url(#a3)"/>
+  <line x1="400" y1="68" x2="570" y2="108" stroke="#5b6878" stroke-width="2" marker-end="url(#a3)"/>
+
+  <rect x="30" y="110" width="200" height="104" rx="8" fill="#fdf3e1" stroke="#b7791f" stroke-width="1.5"/>
+  <text x="130" y="134" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1d2733">Problem at site</text>
+  <text x="130" y="156" text-anchor="middle" font-size="11" fill="#1d2733">Damage, closed dock,</text>
+  <text x="130" y="172" text-anchor="middle" font-size="11" fill="#1d2733">unsafe unloading</text>
+  <text x="130" y="194" text-anchor="middle" font-size="11" fill="#b7791f" font-weight="bold">Report an exception</text>
+
+  <rect x="250" y="110" width="200" height="104" rx="8" fill="#fde8e6" stroke="#b42318" stroke-width="1.5"/>
+  <text x="350" y="134" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1d2733">Can't deliver</text>
+  <text x="350" y="156" text-anchor="middle" font-size="11" fill="#1d2733">Attempt made, but the</text>
+  <text x="350" y="172" text-anchor="middle" font-size="11" fill="#1d2733">drop-off was not possible</text>
+  <text x="350" y="194" text-anchor="middle" font-size="11" fill="#b42318" font-weight="bold">Failed attempt → broker</text>
+
+  <rect x="470" y="110" width="210" height="104" rx="8" fill="#e6f0fb" stroke="#1f5fae" stroke-width="1.5"/>
+  <text x="575" y="134" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1d2733">Driver can't continue</text>
+  <text x="575" y="156" text-anchor="middle" font-size="11" fill="#1d2733">Illness, vehicle problem,</text>
+  <text x="575" y="172" text-anchor="middle" font-size="11" fill="#1d2733">or other reasons</text>
+  <text x="575" y="194" text-anchor="middle" font-size="11" fill="#1f5fae" font-weight="bold">Broker arranges handover</text>
+
+  <!-- outcomes -->
+  <line x1="130" y1="214" x2="130" y2="246" stroke="#5b6878" stroke-width="2" marker-end="url(#a3)"/>
+  <line x1="350" y1="214" x2="350" y2="246" stroke="#5b6878" stroke-width="2" marker-end="url(#a3)"/>
+  <line x1="575" y1="214" x2="575" y2="246" stroke="#5b6878" stroke-width="2" marker-end="url(#a3)"/>
+
+  <rect x="30" y="248" width="200" height="82" rx="8" fill="#f1f4f8" stroke="#5b6878"/>
+  <text x="130" y="272" text-anchor="middle" font-size="11.5" fill="#1d2733">Broker records a</text>
+  <text x="130" y="290" text-anchor="middle" font-size="11.5" fill="#1d2733">resolution so you can</text>
+  <text x="130" y="308" text-anchor="middle" font-size="11.5" fill="#1d2733">continue</text>
+
+  <rect x="250" y="248" width="200" height="82" rx="8" fill="#f1f4f8" stroke="#5b6878"/>
+  <text x="350" y="272" text-anchor="middle" font-size="11.5" fill="#1d2733">Broker chooses:</text>
+  <text x="350" y="290" text-anchor="middle" font-size="11.5" fill="#1d2733">redeliver, or return</text>
+  <text x="350" y="308" text-anchor="middle" font-size="11.5" fill="#1d2733">cargo to pickup</text>
+
+  <rect x="470" y="248" width="210" height="82" rx="8" fill="#f1f4f8" stroke="#5b6878"/>
+  <text x="575" y="272" text-anchor="middle" font-size="11.5" fill="#1d2733">Replacement driver</text>
+  <text x="575" y="290" text-anchor="middle" font-size="11.5" fill="#1d2733">accepts. The first driver</text>
+  <text x="575" y="308" text-anchor="middle" font-size="11.5" fill="#1d2733">stays responsible until then</text>
+</svg>
+<figcaption>Figure 9. Choose the path that matches what happened. Reporting a problem does not mean the delivery succeeded.</figcaption>
+</figure>
+
+<h3>Owner requests and driver rate changes</h3>
+<ul>
+  <li><strong>Owner requests</strong> (store owner): ask for a quotation review, a destination/cargo change, or a cancellation. Only one request can be waiting at a time. The current instructions stay in force until the broker responds.</li>
+  <li><strong>Driver rate changes</strong> (broker): before a driver is selected, the rate changes immediately. After an offer or assignment, the new rate is a <em>proposal</em> the driver must accept. Declining keeps the agreed rate.</li>
+  <li><strong>Correcting a quotation</strong> (broker, before pickup): requires a reason and changed amounts. The store must accept the corrected quote again before a driver can be offered the job.</li>
+</ul>
+
+<!-- QUICK REFERENCE -->
+<div class="page-break"></div>
+<h2>9. Quick reference</h2>
+
+<h3>Status path</h3>
+<table>
+  <tr><th>Status</th><th>Meaning</th><th>Who moves it on</th><th>Next action</th></tr>
+  <tr><td>Awaiting quote</td><td>Request submitted</td><td>Broker</td><td>Issue quotation</td></tr>
+  <tr><td>Quote ready</td><td>Price offered to store</td><td>Store</td><td>Accept quotation</td></tr>
+  <tr><td>Ready to assign</td><td>Customer agreed</td><td>Broker</td><td>Send job offer</td></tr>
+  <tr><td>Offered</td><td>Driver has the offer</td><td>Driver</td><td>Accept or decline (expires in 1 hour)</td></tr>
+  <tr><td>Assigned</td><td>Driver accepted responsibility</td><td>Driver</td><td>Record arrival, then confirm pickup</td></tr>
+  <tr><td>In transit</td><td>Cargo collected</td><td>Driver</td><td>Complete stops, confirm delivery</td></tr>
+  <tr><td>Delivered</td><td>Proof recorded</td><td>Broker</td><td>Issue invoice</td></tr>
+  <tr><td>Delivery failed / Returning / Returned</td><td>Exception or return path</td><td>Broker</td><td>Redeliver or record return</td></tr>
+  <tr><td>Cancelled</td><td>Request closed</td><td>—</td><td>None</td></tr>
+</table>
+
+<h3>Rules to remember</h3>
+<table>
+  <tr><th>Topic</th><th>Rule</th></tr>
+  <tr><td>Quotation</td><td>Valid for 48 hours; the store must accept the current version.</td></tr>
+  <tr><td>Job offer</td><td>Expires after 1 hour if unanswered.</td></tr>
+  <tr><td>Driver eligibility</td><td>Approved driver and truck, enough weight and pallet capacity, liftgate if required, free pickup window.</td></tr>
+  <tr><td>Delivery proof</td><td>PNG, JPEG or PDF, up to 2 MiB, uploaded after arrival at the final stop.</td></tr>
+  <tr><td>Completion needs</td><td>All stops done, no open exception, arrival recorded, fresh proof, receipt reference, recipient name.</td></tr>
+  <tr><td>Money</td><td>Customer price and driver rate are separate. Invoices and payments are recorded, not transferred, by the app.</td></tr>
+  <tr><td>Pricing</td><td>Amounts are entered in whole cents (e.g. $485.00). Fractional cents are rejected.</td></tr>
+</table>
+
+<div class="box ok">
+  <strong>Need help?</strong> If a button is blocked, the app shows the reason in the status panel and the <em>Action required</em> list. Start there before contacting your broker.
+</div>
+
+<footer class="note">YYC Brokers · Basic Delivery Workflow Tutorial. Based on the app's workflow rules as of the current version. Statuses and labels may change in future releases.</footer>
+
+</body>
+</html>

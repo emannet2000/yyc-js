@@ -139,8 +139,13 @@
   animation: livemap-pulse 2s ease-in-out infinite;
 }
 @keyframes livemap-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 .livemap-header > div {
   flex: 1;
@@ -1703,4 +1708,73 @@ body {
   .attention-queue li .btn {
     width: 100%;
   }
+}
+.livemap-canvas {
+  width: 100%;
+  height: 320px;
+  display: block;
+  background: #eef2f7;
+}
+.card .livemap-canvas {
+  margin: 12px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  height: 260px;
+}
+.livemap-canvas[data-stale='true'] {
+  filter: grayscale(0.35);
+}
+.livemap-canvas .leaflet-container {
+  font-family: inherit;
+}
+.livemap-wrap {
+  position: relative;
+}
+.livemap-recenter {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 500;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #b8c4d3;
+  background: #ffffff;
+  color: #1d2733;
+  cursor: pointer;
+}
+.livemap-recenter:focus-visible {
+  outline: 2px solid #1f5fae;
+  outline-offset: 2px;
+}
+/* Printing one invoice: only the invoice card is shown, without its forms and buttons. */
+@media print {
+  body.printing-invoice * {
+    visibility: hidden;
+  }
+  body.printing-invoice .invoice-print-target,
+  body.printing-invoice .invoice-print-target * {
+    visibility: visible;
+  }
+  body.printing-invoice .invoice-print-target {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    box-shadow: none;
+    border: 0;
+  }
+  body.printing-invoice .invoice-print-target form,
+  body.printing-invoice .invoice-print-target button,
+  body.printing-invoice .invoice-print-target .invoice-print-head button {
+    display: none !important;
+  }
+}
+.invoice-print-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }

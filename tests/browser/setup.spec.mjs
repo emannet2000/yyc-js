@@ -27,7 +27,7 @@ test('first broker onboarding uses a one-time operator token and closes setup', 
       .getByRole('button', { name: 'Set up broker account', exact: true })
       .click();
     await page.getByLabel('Operator setup token', { exact: true }).fill(token);
-    await page.getByLabel('Broker name', { exact: true }).fill('Operations Broker');
+    await page.getByLabel('Full name', { exact: true }).fill('Operations Broker');
     await page.getByLabel('Contact phone', { exact: true }).fill('4035550100');
     await page
       .getByLabel('Email address', { exact: true })

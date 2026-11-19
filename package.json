@@ -23,9 +23,12 @@
     "recovery:drill": "node server/maintenance-cli.js drill",
     "start:configured": "node --env-file=.env server/start.js",
     "setup": "node server/setup.js",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "config:check": "node server/config-check-cli.js"
   },
   "dependencies": {
+    "@types/leaflet": "^1.9.22",
+    "leaflet": "^1.9.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "zustand": "5.1.0"

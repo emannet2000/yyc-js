@@ -1,5 +1,8 @@
 import { nextStep, attentionQueue, driverBlockers } from './workflow';
 import type { Shipment, User } from './types';
+import { fitNote, rankDrivers } from './driverRanking';
+
+const ACTIVE_JOB_STATUSES = ['Assigned', 'In transit', 'Delivery failed', 'Returning'];
 export function WorkflowGuide({
   s,
   user,
@@ -107,6 +110,20 @@ export function DispatchReadiness({
     reasons: driverBlockers(s, driver, shipments),
   }));
   const available = reviewed.filter((item) => !item.reasons.length);
+  // Ranking uses only data the broker already sees: approval, truck capacity and job load.
+  const candidates = reviewed.map(({ driver, reasons }) => ({
+    id: driver.id,
+    blocked: reasons.length > 0,
+    spareKg: driver.truck ? driver.truck.kg - s.kg : null,
+    activeJobs: shipments.filter(
+      (j) => j.driverId === driver.id && ACTIVE_JOB_STATUSES.includes(j.status),
+    ).length,
+  }));
+  const order = new Map(rankDrivers(candidates).map((c, i) => [c.id, i]));
+  const ranked = [...reviewed].sort(
+    (a, b) => (order.get(a.driver.id) ?? 0) - (order.get(b.driver.id) ?? 0),
+  );
+  const bestId = ranked.find((item) => !item.reasons.length)?.driver.id;
   return (
     <div className="dispatch-readiness">
       <p>
@@ -125,16 +142,22 @@ export function DispatchReadiness({
         <summary>Review driver availability</summary>
         {reviewed.length ? (
           <ul>
-            {reviewed.map(({ driver, reasons }) => (
-              <li key={driver.id}>
-                <strong>{driver.name}</strong>
-                <span>
-                  {reasons.length
-                    ? reasons.join(' · ')
-                    : 'Available · meets truck and schedule requirements'}
-                </span>
-              </li>
-            ))}
+            {ranked.map(({ driver, reasons }) => {
+              const candidate = candidates.find((c) => c.id === driver.id)!;
+              return (
+                <li key={driver.id}>
+                  <strong>
+                    {driver.name}
+                    {driver.id === bestId && <span className="tag"> Best fit</span>}
+                  </strong>
+                  <span>
+                    {reasons.length
+                      ? reasons.join(' · ')
+                      : `Available · ${fitNote(candidate)}`}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p>No drivers have registered yet.</p>

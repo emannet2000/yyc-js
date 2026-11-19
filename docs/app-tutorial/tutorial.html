@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YYC Brokers — Complete Tutorial</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
+  :root { --ink:#1d2733; --muted:#5b6878; --line:#d7dee8; --brand:#1f5fae; --brand-soft:#e6f0fb;
+    --amber:#b7791f; --amber-soft:#fdf3e1; --green:#237a4b; --green-soft:#e4f4ea; --red:#b42318; --red-soft:#fde8e6; --grey:#f1f4f8; }
+  * { box-sizing:border-box; }
+  body { font-family:"DejaVu Sans", Arial, Helvetica, sans-serif; color:var(--ink); font-size:10.8pt; line-height:1.5; margin:0; }
+  h1 { font-size:26pt; margin:0 0 6pt; color:var(--brand); }
+  h2 { font-size:16pt; margin:0 0 8pt; padding-bottom:3pt; border-bottom:2px solid var(--brand-soft); break-after:avoid; }
+  h3 { font-size:12pt; margin:14pt 0 4pt; color:var(--brand); break-after:avoid; }
+  h4 { font-size:10.8pt; margin:8pt 0 2pt; break-after:avoid; }
+  p { margin:5pt 0; }
+  .eyebrow { text-transform:uppercase; letter-spacing:1.4pt; font-size:8.5pt; color:var(--muted); font-weight:bold; }
+  .lead { font-size:12.5pt; color:var(--muted); }
+  .cover { border-radius:10pt; background:linear-gradient(135deg,#1f5fae 0%,#2f7fd0 60%,#46a0e0 100%); color:#fff; padding:40pt 30pt; margin-bottom:18pt; }
+  .cover h1 { color:#fff; font-size:32pt; }
+  .cover .eyebrow { color:#d6e8fb; } .cover .lead { color:#e8f2fd; }
+  .page-break { break-before:page; page-break-before:always; }
+  figure { margin:10pt 0; break-inside:avoid; page-break-inside:avoid; }
+  figure svg { width:100%; height:auto; display:block; border:1px solid var(--line); border-radius:8pt; background:#fbfcfe; }
+  figcaption { font-size:8.8pt; color:var(--muted); margin-top:3pt; }
+  .box { border-left:4px solid var(--brand); background:var(--brand-soft); padding:7pt 10pt; border-radius:4pt; margin:8pt 0; break-inside:avoid; }
+  .box.warn { border-color:var(--amber); background:var(--amber-soft); }
+  .box.ok { border-color:var(--green); background:var(--green-soft); }
+  .box.bad { border-color:var(--red); background:var(--red-soft); }
+  table { width:100%; border-collapse:collapse; margin:6pt 0; font-size:9.4pt; break-inside:auto; }
+  tr { break-inside:avoid; }
+  th, td { text-align:left; padding:3pt 6pt; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:var(--grey); }
+  .step { display:flex; gap:9pt; margin:6pt 0; break-inside:avoid; }
+  .num { flex:0 0 22pt; height:22pt; border-radius:11pt; background:var(--brand); color:#fff; font-weight:bold; text-align:center; line-height:22pt; font-size:10pt; }
+  .step p { margin:1pt 0; }
+  .who { display:inline-block; font-size:8.5pt; font-weight:bold; padding:1pt 7pt; border-radius:8pt; background:var(--grey); border:1px solid var(--line); }
+  .pill { display:inline-block; font-size:9pt; padding:0 7pt; border-radius:9pt; background:var(--grey); border:1px solid var(--line); font-weight:bold; white-space:nowrap; }
+  .btn { display:inline-block; font-size:9pt; font-weight:bold; padding:0 7pt; border-radius:4pt; background:#fff; border:1px solid #b8c4d3; color:var(--ink); }
+  .btn.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+  ul, ol { margin:3pt 0 3pt 16pt; padding:0; } li { margin:2pt 0; }
+  .small { font-size:9pt; color:var(--muted); }
+  code { font-family:"DejaVu Sans Mono", monospace; font-size:9pt; background:var(--grey); padding:0 3pt; border-radius:2pt; }
+  pre { font-family:"DejaVu Sans Mono", monospace; font-size:8.6pt; background:#0f1b2a; color:#e6edf6; padding:8pt 10pt; border-radius:5pt; white-space:pre-wrap; break-inside:avoid; }
+  .toc td { border:none; padding:2pt 4pt; font-size:10pt; }
+  .tag { font-size:8pt; font-weight:bold; padding:0 5pt; border-radius:3pt; color:#fff; }
+  .t-admin { background:var(--brand); } .t-store { background:var(--green); } .t-driver { background:var(--amber); } .t-all { background:var(--muted); }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<div class="cover">
+  <div class="eyebrow">YYC Brokers · Delivery Workspace</div>
+  <h1>Complete Tutorial</h1>
+  <div class="lead">How to set up, run and use every part of the trucking and delivery workspace: for store owners, brokers, drivers and the people who operate the server.</div>
+  <p style="color:#e8f2fd;margin-top:18pt;font-size:10pt">Covers: setup · accounts and recovery · delivery requests · quotations · dispatch and offers · driver work · pickup and delivery proof · exceptions and returns · handovers · rate changes · billing and payouts · live tracking · Android companion · offline work · reports · operations and backups · troubleshooting</p>
+</div>
+
+<h2>Contents</h2>
+<table class="toc">
+<tr><td>1. Introduction</td><td>What the app is for</td></tr>
+<tr><td>2. Key concepts</td><td>Roles, statuses, the three agreements</td></tr>
+<tr><td>3. Getting started (developers)</td><td>Run the app locally with demo data</td></tr>
+<tr><td>4. Deploying and first broker account</td><td>Production setup</td></tr>
+<tr><td>5. Signing in, registering and recovering access</td><td>All roles</td></tr>
+<tr><td>6. The workspace layout</td><td>Navigation for each role</td></tr>
+<tr><td>7. Store owner guide</td><td>Requests, quotes, owner requests, tracking</td></tr>
+<tr><td>8. Broker guide</td><td>Operations, approvals, pricing, dispatch, exceptions</td></tr>
+<tr><td>9. Driver guide</td><td>Registration, offers, pickup, delivery, payouts</td></tr>
+<tr><td>10. Changes, returns and handovers</td><td>Shared procedures for brokers and drivers</td></tr>
+<tr><td>11. Billing, payouts and reports</td><td>Ledger rules</td></tr>
+<tr><td>12. Live tracking, ETA and recipient links</td><td>Location features</td></tr>
+<tr><td>13. Android companion app</td><td>Pairing and background sharing</td></tr>
+<tr><td>14. Offline work and sync</td><td>What happens without signal</td></tr>
+<tr><td>15. Operations: backups, recovery drills, CLI</td><td>For the operator</td></tr>
+<tr><td>16. Rules reference, troubleshooting, glossary</td><td>Quick answers</td></tr>
+</table>
+
+<!-- ============ 1 ============ -->
+<div class="page-break"></div>
+<h2>1. Introduction</h2>
+<p>YYC Brokers is a delivery workspace for trucking brokers, the businesses that need goods moved (called <em>store owners</em> here), and the drivers who move them. The app is a React web application backed by a Node.js API and an SQLite database. Drivers can also use a companion Android app for background location sharing.</p>
+<p>The app keeps three commitments separate, because they are made by different people at different times:</p>
+<ul>
+  <li><strong>The store agrees to the service and the customer price.</strong> It accepts a quotation for a specific version of the delivery.</li>
+  <li><strong>The broker arranges the work.</strong> It prices the job, selects a driver, and sends the offer.</li>
+  <li><strong>The driver accepts responsibility for the cargo.</strong> Acceptance, pickup and delivery each record who acted and when.</li>
+</ul>
+<p>Every step is recorded in the delivery's activity history, and the app checks rules on the server, not only in the screen, so a button cannot bypass an outstanding problem.</p>
+
+<div class="box warn"><strong>Not a payment processor.</strong> The app records invoices, payments, refunds and driver payouts as a ledger. It does not charge cards or move money between bank accounts. Reconcile ledger entries against your real payment process.</div>
+
+<!-- ============ 2 ============ -->
+<h2 style="margin-top:14pt">2. Key concepts</h2>
+<h3>Roles</h3>
+<table>
+<tr><th>Role in the app</th><th>Who it is</th><th>Main jobs</th></tr>
+<tr><td><span class="tag t-admin">BROKER</span> (internal role <code>admin</code>)</td><td>The brokerage staff. The sidebar shows "Broker".</td><td>Approve drivers and trucks, price jobs, send offers, handle exceptions, invoice, manage accounts, reports.</td></tr>
+<tr><td><span class="tag t-store">STORE</span></td><td>A business that requests deliveries.</td><td>Request deliveries, accept quotes, submit owner requests, follow tracking.</td></tr>
+<tr><td><span class="tag t-driver">DRIVER</span></td><td>An individual with a registered truck.</td><td>Accept offers, record arrival and pickup, upload proof, confirm delivery, view payouts.</td></tr>
+</table>
+
+<h3>Delivery statuses</h3>
+<table>
+<tr><th>Status</th><th>Meaning</th></tr>
+<tr><td>Awaiting quote</td><td>Request submitted; broker has not priced it.</td></tr>
+<tr><td>Quote ready</td><td>Quotation issued; waiting for the store to accept.</td></tr>
+<tr><td>Ready to assign</td><td>Store accepted the quote; broker can offer the job.</td></tr>
+<tr><td>Offered</td><td>Job offered to a driver, who has not yet answered.</td></tr>
+<tr><td>Assigned</td><td>Driver accepted responsibility; pickup not yet confirmed.</td></tr>
+<tr><td>In transit</td><td>Cargo collected; driver responsible for delivery.</td></tr>
+<tr><td>Delivery failed</td><td>An attempt could not complete the drop-off; broker decides next step.</td></tr>
+<tr><td>Returning / Returned</td><td>Cargo going back to pickup / return recorded.</td></tr>
+<tr><td>Delivered</td><td>Completed with proof. Eligible for invoicing.</td></tr>
+<tr><td>Cancelled</td><td>Request closed.</td></tr>
+</table>
+
+<h3>Three agreements, one delivery</h3>
+<figure>
+<svg viewBox="0 0 700 220" role="img" aria-label="Three agreements">
+  <rect x="20" y="30" width="200" height="150" rx="10" fill="#e6f0fb" stroke="#1f5fae" stroke-width="2"/>
+  <text x="120" y="60" text-anchor="middle" font-size="14" font-weight="bold" fill="#1f5fae">Store agreement</text>
+  <text x="120" y="88" text-anchor="middle" font-size="11.5" fill="#1d2733">Accepts the customer</text>
+  <text x="120" y="106" text-anchor="middle" font-size="11.5" fill="#1d2733">price and shipment</text>
+  <text x="120" y="124" text-anchor="middle" font-size="11.5" fill="#1d2733">version</text>
+  <text x="120" y="160" text-anchor="middle" font-size="10.5" fill="#5b6878">Quote ready → Ready to assign</text>
+
+  <rect x="250" y="30" width="200" height="150" rx="10" fill="#e4f4ea" stroke="#237a4b" stroke-width="2"/>
+  <text x="350" y="60" text-anchor="middle" font-size="14" font-weight="bold" fill="#237a4b">Broker arrangement</text>
+  <text x="350" y="88" text-anchor="middle" font-size="11.5" fill="#1d2733">Prices, selects a suitable</text>
+  <text x="350" y="106" text-anchor="middle" font-size="11.5" fill="#1d2733">driver, sends the offer</text>
+  <text x="350" y="160" text-anchor="middle" font-size="10.5" fill="#5b6878">Ready to assign → Offered</text>
+
+  <rect x="480" y="30" width="200" height="150" rx="10" fill="#fdf3e1" stroke="#b7791f" stroke-width="2"/>
+  <text x="580" y="60" text-anchor="middle" font-size="14" font-weight="bold" fill="#b7791f">Driver responsibility</text>
+  <text x="580" y="88" text-anchor="middle" font-size="11.5" fill="#1d2733">Accepts the job, collects,</text>
+  <text x="580" y="106" text-anchor="middle" font-size="11.5" fill="#1d2733">delivers, provides proof</text>
+  <text x="580" y="160" text-anchor="middle" font-size="10.5" fill="#5b6878">Offered → Assigned → In transit</text>
+
+  <line x1="222" y1="105" x2="248" y2="105" stroke="#5b6878" stroke-width="2"/>
+  <line x1="452" y1="105" x2="478" y2="105" stroke="#5b6878" stroke-width="2"/>
+</svg>
+<figcaption>Figure 1. Each agreement is recorded separately. Changing one can require fresh consent from another.</figcaption>
+</figure>
+
+<!-- ============ 3 ============ -->
+<div class="page-break"></div>
+<h2>3. Getting started (developers and evaluators)</h2>
+<p>Use this path to run the app on your own computer with sample data. It is not a production setup.</p>
+
+<h3>Requirements</h3>
+<ul>
+<li>Node.js 22.13 or newer, and npm. Node 22 may print an experimental SQLite warning; that is expected.</li>
+<li>A terminal opened in the project folder.</li>
+</ul>
+
+<h3>Steps</h3>
+<div class="step"><div class="num">1</div><div><p>Install dependencies.</p><pre>npm ci</pre></div></div>
+<div class="step"><div class="num">2</div><div><p>Load sample accounts into the local database (development only).</p><pre>npm run seed</pre>
+<p class="small">Creates a broker, a store and a driver. Sample credentials are listed in <code>scripts/seed.js</code>. Change or delete them before any real use.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>Start the API and the development frontend together.</p><pre>npm run dev</pre>
+<p class="small">The API runs on <code>http://127.0.0.1:3000</code>. Vite shows its own address; open the Vite URL at <code>/react/</code>.</p></div></div>
+<div class="step"><div class="num">4</div><div><p>Sign in with a sample account, or register a new store or driver. Drivers and trucks need broker approval before they can accept work.</p></div></div>
+
+<div class="box"><strong>Database location.</strong> By default the database is <code>data/yyc.sqlite</code>. Set <code>DATABASE_PATH</code> to use another file. Parent folders and an empty schema are created automatically. Tests never touch the workspace database.</div>
+
+<h3>Running the checks</h3>
+<pre>npm test              # unit, integration and DOM tests
+npm run lint          # ESLint
+npm run format:check  # Prettier
+npm run build         # type-check and production build
+npm run test:browser  # Playwright acceptance (needs: npx playwright install --with-deps chromium)</pre>
+
+<!-- ============ 4 ============ -->
+<div class="page-break"></div>
+<h2>4. Deploying and creating the first broker account</h2>
+<p>A new production workspace has no accounts. Public registration cannot create a broker, and there are no default passwords. The first broker is created through a one-time setup token.</p>
+
+<h3>Operator steps (server)</h3>
+<div class="step"><div class="num">1</div><div><p>Copy <code>.env.example</code> to <code>.env</code>. Set <code>PUBLIC_ORIGIN</code> to your HTTPS address, keep <code>NODE_ENV=production</code> and <code>COOKIE_SECURE=true</code>, and point <code>DATABASE_PATH</code> and <code>BACKUP_DIRECTORY</code> at persistent storage.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>Build and issue a setup token.</p><pre>npm ci
+npm run build
+node --env-file=.env server/setup.js</pre>
+<p class="small">The token expires after 30 minutes, is stored only as a hash, and is consumed when the first broker is created.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>Start the service under a process supervisor. Put HTTPS in front of it with a reverse proxy that forwards to <code>127.0.0.1:3000</code>, and preserve the original Host header.</p><pre>npm run start:configured</pre></div></div>
+
+<h3>First-broker steps (browser)</h3>
+<div class="step"><div class="num">4</div><div><p>Open the login page and choose <strong>Set up broker account</strong>.</p></div></div>
+<div class="step"><div class="num">5</div><div><p>Enter the setup token, then your broker name, contact phone, email and password.</p></div></div>
+
+<div class="box warn"><strong>Setup closes permanently</strong> once the first broker exists, even if that account is later disabled. Keep the setup token private and do not send it through chat.</div>
+
+<h3>Startup safety checks</h3>
+<p>The server refuses to start with an invalid production origin, insecure cookies, an ephemeral database, or invalid backup settings. This is deliberate; read the error message and correct the <code>.env</code> file.</p>
+
+<h3>Routing and tracking providers (optional)</h3>
+<p>Road distance, driving time and ETA need a routing provider. Configure either an OpenRouteService key (<code>ORS_API_KEY</code>, with <code>ORS_PROFILE=driving-hgv</code> for a truck profile) or your own OSRM-compatible and Nominatim-compatible endpoints (<code>ROUTING_URL</code>, <code>GEOCODING_URL</code>). Keep provider credentials on the server; they are never placed in frontend or Android code. Without a provider, pickup-window scheduling still works, but road ETAs are unavailable.</p>
+
+<!-- ============ 5 ============ -->
+<div class="page-break"></div>
+<h2>5. Signing in, registering and recovering access</h2>
+
+<h3>Sign in</h3>
+<p>Open the login page, enter your email and password, and choose <strong>Log in</strong>. Sessions end on logout, when a password changes, or when an account is disabled.</p>
+
+<h3>Register</h3>
+<table>
+<tr><th>Account</th><th>What to enter</th><th>What happens next</th></tr>
+<tr><td>Store</td><td>Business name, contact phone, email, password; store delivery address and receiving contact</td><td>Can request deliveries immediately.</td></tr>
+<tr><td>Driver</td><td>Full name, phone, email, password; truck make/model, plate or unit reference, truck type (Box truck or Dry van), payload (kg), pallet capacity, service area, liftgate yes/no</td><td>Waits for broker approval of the driver <em>and</em> the truck before accepting jobs.</td></tr>
+<tr><td>Broker</td><td>Not available publicly</td><td>Created by setup or by an existing broker in <strong>Accounts</strong>.</td></tr>
+</table>
+<p class="small">Public registration is rate-limited per connection address (20 attempts per 15 minutes). Duplicate emails and truck plates are rejected.</p>
+
+<h3>Forgotten password</h3>
+<ul>
+<li><strong>Forgot password?</strong> asks for a reset. If the operator has configured email delivery (<code>RESET_DELIVERY_URL</code>, HTTPS only), a reset link is sent. Reset links expire after a short window and work once.</li>
+<li>If no email delivery is configured, ask a broker. A broker can issue a recovery link after verifying your identity through a trusted private channel.</li>
+</ul>
+
+<h3>Broker-issued recovery link</h3>
+<div class="step"><div class="num">1</div><div><p>In <strong>Accounts</strong>, open the account, enter a recovery verification reason (the page reminds you to verify the account holder first), and choose <strong>Create password reset link</strong>.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>Share the link through a verified private channel. It expires after 30 minutes and works only once.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>The person opens <strong>Recover your account</strong> and sets a new password. This signs out every session and invalidates all recovery links.</p></div></div>
+<div class="box"><strong>Why the link is safe to open once:</strong> the token lives in the URL fragment, which the page removes from browser history after reading it. Only a hash is stored on the server.</div>
+
+<h3>If the only broker loses access</h3>
+<p>An operator provisions another broker with the local command <code>node --env-file=.env server/create-admin.js</code>, using <code>ADMIN_EMAIL</code>, <code>ADMIN_PASSWORD</code> (12–128 characters), <code>ADMIN_NAME</code> and <code>ADMIN_PHONE</code>. Then that broker performs verified recovery for the locked-out person.</p>
+
+<!-- ============ 6 ============ -->
+<div class="page-break"></div>
+<h2>6. The workspace layout</h2>
+<p>After sign-in you see a sidebar with navigation for your role, a main area with summary cards and delivery lists, and a detail drawer that opens when you select a delivery.</p>
+
+<figure>
+<svg viewBox="0 0 700 340" role="img" aria-label="Workspace layout mockup">
+  <rect x="10" y="10" width="680" height="320" rx="10" fill="#fff" stroke="#d7dee8" stroke-width="1.5"/>
+  <rect x="10" y="10" width="170" height="320" rx="10" fill="#1d2733"/>
+  <rect x="10" y="300" width="170" height="30" fill="#1d2733"/>
+  <text x="26" y="42" font-size="13" font-weight="bold" fill="#fff">YYC Brokers</text>
+  <text x="26" y="62" font-size="9" fill="#9fb0c4">YOUR WORKSPACE</text>
+  <g font-size="11" fill="#e6edf6">
+    <rect x="22" y="72" width="146" height="26" rx="5" fill="#2f4a68"/><text x="32" y="90">◫  Dashboard</text>
+    <text x="32" y="116">+  Request delivery</text>
+    <text x="32" y="140">▤  My deliveries</text>
+    <text x="32" y="164">◎  Tracking</text>
+    <text x="32" y="188">!  Action required</text>
+    <text x="32" y="212">○  Store profile</text>
+    <text x="32" y="236">◉  Notifications</text>
+    <text x="32" y="260">$  Billing</text>
+  </g>
+  <text x="26" y="324" font-size="9" fill="#9fb0c4">Name · role · Log out</text>
+
+  <text x="200" y="40" font-size="13" font-weight="bold" fill="#1d2733">Your deliveries</text>
+  <rect x="200" y="52" width="150" height="26" rx="13" fill="#f1f4f8" stroke="#b8c4d3"/>
+  <text x="212" y="69" font-size="10" fill="#5b6878">Search reference, address…</text>
+  <rect x="360" y="52" width="110" height="26" rx="13" fill="#f1f4f8" stroke="#b8c4d3"/>
+  <text x="372" y="69" font-size="10" fill="#5b6878">All statuses ▾</text>
+
+  <rect x="200" y="92" width="480" height="92" rx="8" fill="#fff" stroke="#b8c4d3"/>
+  <text x="214" y="112" font-size="10" fill="#5b6878">DEL-0042 · Store 7</text>
+  <rect x="520" y="100" width="150" height="18" rx="9" fill="#fdf3e1" stroke="#b7791f"/>
+  <text x="595" y="113" text-anchor="middle" font-size="9.5" fill="#b7791f" font-weight="bold">Quote ready</text>
+  <text x="214" y="136" font-size="11" fill="#1d2733">Next step: Waiting for customer acceptance</text>
+  <text x="214" y="156" font-size="10" fill="#5b6878">Customer quotation: $485.00</text>
+  <rect x="520" y="164" width="150" height="14" rx="7" fill="none"/>
+  <text x="520" y="174" font-size="10" fill="#1f5fae" font-weight="bold">View delivery →</text>
+
+  <rect x="200" y="196" width="480" height="92" rx="8" fill="#fff" stroke="#b8c4d3"/>
+  <text x="214" y="216" font-size="10" fill="#5b6878">DEL-0039 · Store 3</text>
+  <rect x="520" y="224" width="150" height="18" rx="9" fill="#e4f4ea" stroke="#237a4b"/>
+  <text x="595" y="237" text-anchor="middle" font-size="9.5" fill="#237a4b" font-weight="bold">In transit</text>
+  <text x="214" y="260" font-size="11" fill="#1d2733">Next step: Monitor delivery progress</text>
+  <text x="214" y="278" font-size="10" fill="#5b6878">Customer quotation: $310.00</text>
+
+  <!-- detail hint -->
+  <rect x="200" y="298" width="0" height="0"/>
+</svg>
+<figcaption>Figure 2. Layout mockup. The sidebar changes by role. Each card shows the status badge, the next step, and the amount relevant to you (customer quotation for stores and brokers, your driver rate for drivers).</figcaption>
+</figure>
+
+<h3>Navigation by role</h3>
+<table>
+<tr><th>Broker</th><th>Store owner</th><th>Driver</th></tr>
+<tr><td>Operations (dashboard)<br>Deliveries<br>Approvals<br>Accounts<br>Work board<br>Work queue<br>Notifications<br>Billing<br>Reports</td>
+<td>Dashboard<br>Request delivery<br>My deliveries<br>Tracking<br>Action required<br>Store profile<br>Notifications<br>Billing</td>
+<td>My jobs<br>Job offers<br>Action required<br>Delivery history<br>Truck profile<br>Notifications<br>Payouts</td></tr>
+</table>
+<p class="small">The <strong>Action required</strong> list (Work queue for brokers) shows the items that need your attention first, with a button to open each one. Start there each day.</p>
+
+<h3>Refreshing and conflicts</h3>
+<p>Visible screens refresh about every ten seconds, and when the browser regains focus or reconnects. If someone else changes a delivery while you are editing it, the app reports a <strong>version conflict</strong>, reloads the record, and keeps your draft so you can review and resubmit it. Saved changes are not overwritten silently.</p>
+
+<!-- ============ 7 STORE ============ -->
+<div class="page-break"></div>
+<h2>7. Store owner guide</h2>
+<p><span class="tag t-store">STORE OWNER</span> Your job is to describe the work accurately, review the price, and tell the broker when something needs to change.</p>
+
+<h3>7.1 Complete your store profile</h3>
+<p>Open <strong>Store profile</strong> and keep your business name, delivery address and receiving contact current. These values pre-fill future requests and reduce repeated entry.</p>
+
+<h3>7.2 Request a delivery</h3>
+<div class="step"><div class="num">1</div><div><p>Choose <strong>Request delivery</strong>.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>Enter the <strong>pickup address</strong> and the <strong>delivery address</strong>.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>Set the <strong>pickup date</strong> and <strong>pickup window</strong> (for example Morning or Afternoon). Flexible windows overlap every other window that day.</p></div></div>
+<div class="step"><div class="num">4</div><div><p>Describe the cargo: <strong>goods</strong>, <strong>weight (kg)</strong> and <strong>pallet count</strong>. Choose the <strong>vehicle type</strong> (Box truck or Dry van) and list any <strong>unloading requirements</strong>, such as a liftgate.</p></div></div>
+<div class="step"><div class="num">5</div><div><p>Enter the <strong>pickup contact</strong>, the <strong>receiving contact</strong>, <strong>receiving hours</strong>, and an optional <strong>appointment reference</strong>, <strong>cargo details</strong> and <strong>additional instructions</strong>.</p></div></div>
+<div class="step"><div class="num">6</div><div><p>Optionally set a <strong>delivery deadline</strong>. Deadlines are in Edmonton time.</p></div></div>
+<div class="step"><div class="num">7</div><div><p>Select <strong>Submit delivery request</strong>. The delivery appears as <span class="pill">Awaiting quote</span>.</p></div></div>
+
+<figure>
+<svg viewBox="0 0 700 250" role="img" aria-label="Request lifecycle for store">
+  <rect x="10" y="10" width="680" height="230" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <text x="30" y="40" font-size="13" font-weight="bold" fill="#1d2733">What you can do at each stage</text>
+  <g font-size="11">
+    <rect x="30" y="58" width="180" height="150" rx="8" fill="#e6f0fb" stroke="#1f5fae"/>
+    <text x="120" y="82" text-anchor="middle" font-size="12" font-weight="bold" fill="#1f5fae">Awaiting quote</text>
+    <text x="42" y="106" fill="#1d2733">• Edit the stops (if</text><text x="42" y="122" fill="#1d2733">  permitted)</text>
+    <text x="42" y="142" fill="#1d2733">• Withdraw the request</text>
+    <text x="42" y="162" fill="#1d2733">• Wait for a quotation</text>
+    <text x="42" y="196" fill="#5b6878" font-size="10">Broker is pricing it</text>
+
+    <rect x="260" y="58" width="180" height="150" rx="8" fill="#fdf3e1" stroke="#b7791f"/>
+    <text x="350" y="82" text-anchor="middle" font-size="12" font-weight="bold" fill="#b7791f">Quote ready</text>
+    <text x="272" y="106" fill="#1d2733">• Accept quotation</text>
+    <text x="272" y="126" fill="#1d2733">• Submit an owner request</text>
+    <text x="272" y="146" fill="#1d2733">  to question price or details</text>
+    <text x="272" y="196" fill="#5b6878" font-size="10">Quote valid 48 hours</text>
+
+    <rect x="490" y="58" width="180" height="150" rx="8" fill="#e4f4ea" stroke="#237a4b"/>
+    <text x="580" y="82" text-anchor="middle" font-size="12" font-weight="bold" fill="#237a4b">Ready to assign</text>
+    <text x="502" y="106" fill="#1d2733">• Your quote is accepted</text>
+    <text x="502" y="126" fill="#1d2733">• Broker selects a driver</text>
+    <text x="502" y="146" fill="#1d2733">• Follow tracking and ETA</text>
+    <text x="502" y="196" fill="#5b6878" font-size="10">No charge at acceptance</text>
+  </g>
+  <line x1="212" y1="133" x2="256" y2="133" stroke="#5b6878" stroke-width="2"/>
+  <line x1="442" y1="133" x2="486" y2="133" stroke="#5b6878" stroke-width="2"/>
+</svg>
+<figcaption>Figure 3. Store actions depend on the stage. Once a driver is assigned, changes go through an owner request.</figcaption>
+</figure>
+
+<h3>7.3 Review and accept the quotation</h3>
+<p>When the status is <span class="pill">Quote ready</span>, open the delivery, check the price against the shipment details, and select <strong>Accept quotation</strong>. Acceptance applies to the current version only. If the broker corrects the quote later, you must accept the corrected version.</p>
+<div class="box warn"><strong>Do not accept a price you disagree with.</strong> Submit an owner request instead (see 7.4). Acceptance moves the job forward and lets the broker arrange a driver.</div>
+<p class="small">Quotes expire after 48 hours. An expired quote returns to the broker for a new one.</p>
+
+<h3>7.4 Owner requests</h3>
+<p>Use <strong>Owner requests</strong> on a delivery to ask for changes after the initial request. There are three kinds:</p>
+<table>
+<tr><th>Request type</th><th>Use it to</th><th>Typical result</th></tr>
+<tr><td>Quotation review</td><td>Question the price</td><td>Broker changes the customer price; you must accept again.</td></tr>
+<tr><td>Destination or cargo change</td><td>Change the address, weight or pallet count</td><td>Broker approves and the work gets a fresh quotation, or declines with an explanation.</td></tr>
+<tr><td>Cancellation</td><td>Stop the delivery</td><td>Before pickup, the job closes. After pickup, cargo is returned rather than discarded.</td></tr>
+</table>
+<ul>
+<li>Only one request can be waiting at a time. An urgent cancellation can replace an older pending request; both stay in the history.</li>
+<li>Until the broker responds, the current instructions stay in force. Submitting a request does not change the driver's instructions.</li>
+<li>You can <strong>withdraw</strong> a pending request, with a short explanation.</li>
+</ul>
+
+<h3>7.5 Follow your deliveries</h3>
+<ul>
+<li><strong>My deliveries</strong> lists everything you have requested, searchable by reference, address, cargo or status.</li>
+<li><strong>Tracking</strong> shows the live location, next-stop ETA and progress for deliveries in transit (see Section 12).</li>
+<li><strong>Action required</strong> lists anything waiting on you, such as a quote to accept or a pending owner request decision.</li>
+<li><strong>Notifications</strong> record changes that affect you. Email delivery requires the operator to configure it; in-app notifications are always kept.</li>
+</ul>
+
+<!-- ============ 8 BROKER ============ -->
+<div class="page-break"></div>
+<h2>8. Broker guide</h2>
+<p><span class="tag t-admin">BROKER</span> You own the middle of the process: pricing, dispatch, exceptions, accounts and money records.</p>
+
+<h3>8.1 Daily routine</h3>
+<ol>
+<li>Open <strong>Work queue</strong> (the Action required list) and work from the top. Items are ordered by urgency: open exceptions and owner requests first, then overdue pickups and quotes, then new requests.</li>
+<li>Check <strong>Approvals</strong> for new drivers and trucks.</li>
+<li>Check <strong>Work board</strong> for the flow of deliveries across statuses.</li>
+<li>Check <strong>Operations</strong> for live deliveries, ETAs and reports.</li>
+</ol>
+
+<h3>8.2 Approve drivers and trucks</h3>
+<p><strong>Approvals</strong> lists each driver with a badge: <em>Approved</em> when both the driver and truck are approved, or <em>Pending review</em> otherwise. Choose <strong>Approve</strong> or <strong>Reject</strong>. An approved driver can be stopped later with <strong>Revoke approval</strong>.</p>
+<div class="box"><strong>Approval records your decision.</strong> The app does not verify licences, insurance or vehicle inspections. Complete those checks in your own process first.</div>
+
+<h3>8.3 Price the job (quotation)</h3>
+<div class="step"><div class="num">1</div><div><p>Open a delivery with status <span class="pill">Awaiting quote</span>. Review cargo, route, schedule and equipment. Clarify ambiguous addresses or cargo figures with the store before pricing.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>Enter the <strong>Customer quote (CAD)</strong> and the <strong>Driver rate (CAD)</strong>. Both must be positive amounts in whole cents; fractional cents are rejected.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>Select <strong>Issue quotation</strong>. The status becomes <span class="pill">Quote ready</span>.</p></div></div>
+
+<figure>
+<svg viewBox="0 0 700 200" role="img" aria-label="Two amounts diagram">
+  <rect x="10" y="10" width="680" height="180" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <rect x="40" y="40" width="270" height="110" rx="8" fill="#e6f0fb" stroke="#1f5fae" stroke-width="1.5"/>
+  <text x="56" y="66" font-size="11" font-weight="bold" fill="#1f5fae">CUSTOMER QUOTE</text>
+  <text x="56" y="110" font-size="26" font-weight="bold" fill="#1d2733">$485.00</text>
+  <text x="56" y="132" font-size="10.5" fill="#5b6878">Shown to the store · needs store acceptance</text>
+  <rect x="390" y="40" width="270" height="110" rx="8" fill="#fdf3e1" stroke="#b7791f" stroke-width="1.5"/>
+  <text x="406" y="66" font-size="11" font-weight="bold" fill="#b7791f">DRIVER RATE</text>
+  <text x="406" y="110" font-size="26" font-weight="bold" fill="#1d2733">$360.00</text>
+  <text x="406" y="132" font-size="10.5" fill="#5b6878">Shown to the driver · hidden from the store</text>
+  <text x="350" y="176" text-anchor="middle" font-size="11" fill="#5b6878">Changing the customer price after acceptance needs fresh customer acceptance. Changing only the driver rate follows Section 10.3.</text>
+</svg>
+<figcaption>Figure 4. The two amounts serve different purposes and are seen by different people.</figcaption>
+</figure>
+
+<h3>8.4 Correct a quotation</h3>
+<p>Before pickup, <strong>Correct quotation</strong> lets you change the amounts. You must give a reason and change at least one amount. The previous quote is archived, any assignment or pending offer is cleared, and the delivery returns to <span class="pill">Quote ready</span>. After pickup, corrections are rejected.</p>
+
+<h3>8.5 Send a job offer</h3>
+<div class="step"><div class="num">1</div><div><p>With the status <span class="pill">Ready to assign</span>, select <strong>Send job offer</strong>.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>Open <strong>Review driver availability</strong>. Each driver is listed as Available, or with the reasons they are blocked: approval, truck capacity, pallet capacity, liftgate requirement, or a scheduling clash.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>Choose an approved, suitable driver and send the offer. The status becomes <span class="pill">Offered</span>.</p></div></div>
+<div class="box warn"><strong>Offers expire after one hour</strong> if unanswered, which frees the driver's schedule. A sent offer is not a confirmed job until the driver accepts. Withdraw an offer with a reason if you change your mind.</div>
+
+<figure>
+<svg viewBox="0 0 700 150" role="img" aria-label="Driver eligibility checks">
+  <rect x="10" y="10" width="680" height="130" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <text x="30" y="36" font-size="12" font-weight="bold" fill="#1d2733">The app checks every driver against the job:</text>
+  <g font-size="11" fill="#1d2733">
+    <rect x="30" y="50" width="150" height="40" rx="6" fill="#f1f4f8" stroke="#b8c4d3"/><text x="105" y="74" text-anchor="middle">Driver approved</text>
+    <rect x="195" y="50" width="150" height="40" rx="6" fill="#f1f4f8" stroke="#b8c4d3"/><text x="270" y="74" text-anchor="middle">Truck approved</text>
+    <rect x="360" y="50" width="150" height="40" rx="6" fill="#f1f4f8" stroke="#b8c4d3"/><text x="435" y="74" text-anchor="middle">Weight and pallets</text>
+    <rect x="525" y="50" width="150" height="40" rx="6" fill="#f1f4f8" stroke="#b8c4d3"/><text x="600" y="74" text-anchor="middle">Liftgate if needed</text>
+  </g>
+  <text x="350" y="116" text-anchor="middle" font-size="11" fill="#5b6878">and the driver's pickup window is free, with no live load they have not yet delivered or handed over.</text>
+</svg>
+<figcaption>Figure 5. Eligibility rules are the same in the driver picker and on the server. These are reservation checks; they do not calculate loading time, receiving restrictions or real route feasibility.</figcaption>
+</figure>
+
+<h3>8.6 Reschedule</h3>
+<p>If the pickup date passes before pickup, the app asks for a new date under <strong>Reschedule delivery</strong>. Rescheduling requires fresh customer acceptance and clears current driver commitments, so the driver must be offered again.</p>
+
+<h3>8.7 Resolve exceptions</h3>
+<p>When a driver reports an exception (damaged cargo, closed receiving location, unavailable contact, unsafe unloading), it appears as an open issue on the delivery and blocks pickup or delivery progress. Open the delivery, review the reason and evidence, then record a <strong>Resolution</strong>. The driver can then continue. Record a clear resolution; it is part of the audit trail.</p>
+
+<h3>8.8 Approve or decline owner requests</h3>
+<p>Owner requests appear in your queue. For each one, either:</p>
+<ul>
+<li><strong>Approve and apply</strong> the change. Customer price changes need fresh store acceptance. Shipment changes return the work for a new quotation.</li>
+<li><strong>Decline</strong> with a clear explanation. The current instructions remain in force.</li>
+</ul>
+
+<!-- ============ 9 DRIVER ============ -->
+<div class="page-break"></div>
+<h2>9. Driver guide</h2>
+<p><span class="tag t-driver">DRIVER</span> You accept responsibility for cargo. Read every offer carefully, and only accept a job you can complete.</p>
+
+<h3>9.1 Register your truck</h3>
+<p>Create a driver account and enter your contact details. Then enter your truck: make and model, plate or unit reference, truck type, payload (kg), pallet capacity, service area and whether it has a liftgate. Your broker must approve both you and the truck. Until then, you cannot accept jobs. Keep the truck profile current; any change that affects capacity or equipment needs your broker's review.</p>
+
+<h3>9.2 Respond to a job offer</h3>
+<p>Offers appear under <strong>Job offers</strong> and in <strong>Action required</strong>. Each offer shows the route, cargo, schedule, handling requirements and <em>your</em> agreed rate. The customer price is never shown to drivers.</p>
+<figure>
+<svg viewBox="0 0 700 180" role="img" aria-label="Offer decision">
+  <rect x="10" y="10" width="680" height="160" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <rect x="40" y="36" width="170" height="46" rx="23" fill="#237a4b"/><text x="125" y="64" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">Accept</text>
+  <rect x="265" y="36" width="170" height="46" rx="23" fill="#fff" stroke="#b42318" stroke-width="1.5"/><text x="350" y="64" text-anchor="middle" font-size="13" font-weight="bold" fill="#b42318">Decline</text>
+  <rect x="490" y="36" width="170" height="46" rx="23" fill="#f1f4f8" stroke="#b8c4d3"/><text x="575" y="64" text-anchor="middle" font-size="12" fill="#5b6878">Ignore → expires</text>
+  <text x="125" y="108" text-anchor="middle" font-size="11" fill="#1d2733">Responsibility</text><text x="125" y="124" text-anchor="middle" font-size="11" fill="#1d2733">transfers to you</text>
+  <text x="350" y="108" text-anchor="middle" font-size="11" fill="#1d2733">Job released for the</text><text x="350" y="124" text-anchor="middle" font-size="11" fill="#1d2733">broker to re-offer</text>
+  <text x="575" y="108" text-anchor="middle" font-size="11" fill="#1d2733">Offers expire after</text><text x="575" y="124" text-anchor="middle" font-size="11" fill="#1d2733">one hour</text>
+  <text x="350" y="152" text-anchor="middle" font-size="10.5" fill="#5b6878">If blockers exist (for example, an expired approval), Accept is disabled and the screen states why. You can still decline.</text>
+</svg>
+<figcaption>Figure 6. Accepting is an explicit commitment. Declining or ignoring releases the job.</figcaption>
+</figure>
+
+<h3>9.3 Collect the cargo</h3>
+<div class="step"><div class="num">1</div><div><p>After accepting, the status is <span class="pill">Assigned</span>. Head to the pickup.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>When you arrive, select <strong>Record arrival</strong>. This documents the milestone and starts the location trail.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>After loading, select <strong>Confirm pickup</strong>. The status becomes <span class="pill">In transit</span> and you are responsible for the load.</p></div></div>
+<div class="box bad"><strong>Do not confirm pickup for cargo that is not in your truck.</strong> If cargo is missing, damaged, incorrectly described or unavailable, report an exception instead. Pickup is blocked while an exception is open, and blocked if you already hold another live load.</div>
+
+<h3>9.4 Route and stops</h3>
+<p>The <strong>Route and stops</strong> panel lists your origin, pickup, each intermediate stop in order, road distance and driving time (when routing is configured), and the next stop ETA. Work through stops in order. For each stop select <strong>Complete next stop</strong> once it is done; each stop can have its own receipt and receiving contact. Brokers can edit the stop list until the job is in transit; stores can edit it only while the request is <span class="pill">Awaiting quote</span>.</p>
+
+<h3>9.5 Deliver and upload proof</h3>
+<p>Delivery needs all of the following:</p>
+<ol>
+<li>All intermediate stops completed.</li>
+<li>Arrival recorded at the final destination.</li>
+<li>No open exception.</li>
+<li>A proof file uploaded <strong>after</strong> arrival, linked to the current attempt. Accepted types are PNG, JPEG and PDF, up to 2 MiB each. Use <strong>Evidence files</strong> to add them; up to ten general files are allowed, and a reserved slot is kept for the completion proof.</li>
+<li>A <strong>receipt reference</strong> and the <strong>recipient name</strong>.</li>
+</ol>
+<p>Then select <strong>Confirm delivery</strong>. The status becomes <span class="pill">Delivered</span>. The server stores the evidence reference and its SHA-256 hash, your identity, arrival time and confirmation time.</p>
+<div class="box warn"><strong>Proof taken before pickup does not qualify</strong>, even when its timestamp looks right. A typed name or filename alone cannot complete delivery. The records document what you submitted; they do not verify the recipient's identity.</div>
+
+<h3>9.6 Failed delivery attempts</h3>
+<p>While the job is <span class="pill">In transit</span>, if you cannot complete the drop-off, select <strong>Delivery attempt failed</strong> and explain what happened. Keep the cargo safe and wait. The broker will arrange either a redelivery or a return, and the screen will say which step is waiting on whom.</p>
+
+<h3>9.7 Driver rate proposals</h3>
+<p>If the broker proposes a new rate for a job you already hold, the screen shows <strong>Review the proposed driver rate</strong>. Accept the new rate, or keep your existing agreed rate. Your assignment stays in place either way. Until you accept, the old rate applies.</p>
+
+<h3>9.8 Payouts and history</h3>
+<p><strong>Payouts</strong> shows only your own allocations and payout records. <strong>Delivery history</strong> lists your past jobs and their evidence.</p>
+
+<!-- ============ 10 CHANGES ============ -->
+<div class="page-break"></div>
+<h2>10. Changes, returns and handovers</h2>
+<p>Real operations change. These procedures keep responsibility clear while they do.</p>
+
+<h3>10.1 Cancel or return cargo</h3>
+<ul>
+<li><strong>Before pickup:</strong> a cancellation closes the job, and any dispatch commitment is released.</li>
+<li><strong>After pickup:</strong> cancellation becomes a <strong>return</strong>. The broker arranges <strong>Arrange cargo return</strong>, the delivery enters <span class="pill">Returning</span>, and the driver must record arrival at the return location.</li>
+<li>To finish a return, the driver enters a <strong>return receipt reference</strong> and the name of the person who received the cargo. The status then becomes <span class="pill">Returned</span>.</li>
+</ul>
+
+<h3>10.2 Redelivery after a failed attempt</h3>
+<p>The broker chooses <strong>Arrange redelivery</strong> and sets a new attempt. The driver keeps the cargo until the new attempt. Completed evidence from the failed attempt stays in the record.</p>
+
+<h3>10.3 Driver rate changes</h3>
+<table>
+<tr><th>When</th><th>What happens</th></tr>
+<tr><td>No driver selected yet</td><td>Broker changes the rate immediately.</td></tr>
+<tr><td>Offer or assignment in place</td><td>The new rate is a <em>proposal</em>. The driver must accept it. Declining keeps the agreed rate, and pickup proceeds at that rate.</td></tr>
+<tr><td>Customer price changes</td><td>Separate path. Needs fresh customer acceptance and releases current dispatch commitments.</td></tr>
+</table>
+<p class="small">Financial histories and proposed driver rates are hidden from store owners.</p>
+
+<h3>10.4 Driver handover (broker)</h3>
+<div class="step"><div class="num">1</div><div><p>On an assigned or in-transit job, choose <strong>Arrange driver handover</strong>. Pick an approved, suitable replacement driver and enter a reason.</p></div></div>
+<div class="step"><div class="num">2</div><div><p>The original driver stays assigned, and their tracking stays visible, until the replacement accepts.</p></div></div>
+<div class="step"><div class="num">3</div><div><p>When the replacement accepts, responsibility moves and the pickup progress, shipment details and accepted customer quote are preserved. An in-transit delivery stays in transit.</p></div></div>
+<div class="step"><div class="num">4</div><div><p>You must arrange the physical cargo transfer yourself. The app records responsibility; it does not move the goods.</p></div></div>
+<p>The replacement can decline. The broker can withdraw an offer before it is accepted. Completed trips cannot be handed over.</p>
+<div class="box warn"><strong>Do not use a handover to remove a job from someone's screen.</strong> Handover should correspond to a real, understood transfer of responsibility.</div>
+
+<h3>10.5 Recording an exception</h3>
+<p>Drivers report an exception from the delivery screen with a short description. Brokers see it at once, and it blocks progress until resolved. Exceptions are recorded, not hidden: resolve them with a clear note. Replacement drivers can accept a rescue handover while an exception is open, but the exception still holds progress until the broker resolves it.</p>
+
+<figure>
+<svg viewBox="0 0 700 230" role="img" aria-label="Decision guide for changes">
+  <rect x="10" y="10" width="680" height="210" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <text x="350" y="40" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#1d2733">Which procedure do I need?</text>
+  <g font-size="11" fill="#1d2733">
+    <rect x="30" y="58" width="180" height="56" rx="8" fill="#fdf3e1" stroke="#b7791f"/><text x="120" y="82" text-anchor="middle" font-weight="bold">Cargo problem at site</text><text x="120" y="100" text-anchor="middle">Report an exception</text>
+    <rect x="260" y="58" width="180" height="56" rx="8" fill="#fde8e6" stroke="#b42318"/><text x="350" y="82" text-anchor="middle" font-weight="bold">Drop-off not possible</text><text x="350" y="100" text-anchor="middle">Failed attempt</text>
+    <rect x="490" y="58" width="180" height="56" rx="8" fill="#e6f0fb" stroke="#1f5fae"/><text x="580" y="82" text-anchor="middle" font-weight="bold">Driver cannot continue</text><text x="580" y="100" text-anchor="middle">Broker: handover</text>
+    <rect x="30" y="134" width="180" height="56" rx="8" fill="#f1f4f8" stroke="#5b6878"/><text x="120" y="158" text-anchor="middle">Store changed its mind</text><text x="120" y="176" text-anchor="middle">Owner request</text>
+    <rect x="260" y="134" width="180" height="56" rx="8" fill="#f1f4f8" stroke="#5b6878"/><text x="350" y="158" text-anchor="middle">Price needs changing</text><text x="350" y="176" text-anchor="middle">Correct quote / rate</text>
+    <rect x="490" y="134" width="180" height="56" rx="8" fill="#f1f4f8" stroke="#5b6878"/><text x="580" y="158" text-anchor="middle">Cargo must go back</text><text x="580" y="176" text-anchor="middle">Cargo return</text>
+  </g>
+</svg>
+<figcaption>Figure 7. Pick the procedure that matches what happened. Reporting a problem does not mean the delivery succeeded.</figcaption>
+</figure>
+
+<!-- ============ 11 BILLING ============ -->
+<div class="page-break"></div>
+<h2>11. Billing, payouts and reports</h2>
+<h3>11.1 Invoicing (broker)</h3>
+<p>Once a delivery or return is <span class="pill">Delivered</span> or <span class="pill">Returned</span>, it appears under <strong>Action required</strong> as "Issue invoice". Select <strong>Open invoice form</strong> (or choose it in <strong>Billing</strong>), review the completed job, and issue the customer invoice. Confirmation shows "Invoice issued."</p>
+
+<h3>11.2 Recording money movements (broker)</h3>
+<table>
+<tr><th>Record</th><th>Use it for</th></tr>
+<tr><td>Customer payment</td><td>Money received from the store against an invoice</td></tr>
+<tr><td>Refund or adjustment</td><td>Money returned, or a correction to the customer's balance</td></tr>
+<tr><td>Driver payout</td><td>Money paid to a driver, from their allocated share</td></tr>
+</table>
+<p>Record a transaction only after you have verified it in your bank or payment process, and include a reference that matches that record. Customer billing and driver payouts are separate: a completed delivery does not mean the customer has paid, and a customer payment does not mean the driver was paid.</p>
+
+<h3>11.3 Driver payout allocation (broker)</h3>
+<p>For a job with more than one driver (after a handover), use <strong>Driver payout allocation</strong> to split the agreed total driver rate. Each driver's share needs a recorded reason. A sole cargo driver receives the whole rate by default. Allocation reductions below amounts already paid need a verified reversal first. Payouts are checked against each driver's balance, and allocation revisions are kept in history.</p>
+
+<h3>11.4 Reports (broker)</h3>
+<p><strong>Reports</strong> shows delivery and financial summaries. Apply filters, such as a pickup date range or status, then select <strong>Export CSV</strong> to download the results for spreadsheet work.</p>
+
+<div class="box ok"><strong>The app does not move money.</strong> It is a ledger of what your business has verified. Keep the external records as the source of truth.</div>
+
+<!-- ============ 12 TRACKING ============ -->
+<div class="page-break"></div>
+<h2>12. Live tracking, ETA and recipient links</h2>
+<p>When a driver is on the road, the app can show where the truck is and when it will reach the next stop.</p>
+
+<figure>
+<svg viewBox="0 0 700 250" role="img" aria-label="Tracking data flow">
+  <rect x="10" y="10" width="680" height="230" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <rect x="30" y="60" width="150" height="80" rx="8" fill="#fdf3e1" stroke="#b7791f"/>
+  <text x="105" y="88" text-anchor="middle" font-size="12" font-weight="bold" fill="#1d2733">Driver device</text>
+  <text x="105" y="108" text-anchor="middle" font-size="10" fill="#5b6878">Browser or Android</text>
+  <text x="105" y="124" text-anchor="middle" font-size="10" fill="#5b6878">shares location</text>
+  <rect x="270" y="60" width="160" height="80" rx="8" fill="#e6f0fb" stroke="#1f5fae"/>
+  <text x="350" y="88" text-anchor="middle" font-size="12" font-weight="bold" fill="#1d2733">YYC server</text>
+  <text x="350" y="108" text-anchor="middle" font-size="10" fill="#5b6878">Accepts recent samples</text>
+  <text x="350" y="124" text-anchor="middle" font-size="10" fill="#5b6878">Recalculates ETA</text>
+  <rect x="520" y="32" width="160" height="60" rx="8" fill="#e4f4ea" stroke="#237a4b"/>
+  <text x="600" y="58" text-anchor="middle" font-size="11" font-weight="bold" fill="#1d2733">Workspace views</text>
+  <text x="600" y="76" text-anchor="middle" font-size="10" fill="#5b6878">Store, broker, driver</text>
+  <rect x="520" y="130" width="160" height="60" rx="8" fill="#f1f4f8" stroke="#5b6878"/>
+  <text x="600" y="156" text-anchor="middle" font-size="11" font-weight="bold" fill="#1d2733">Recipient link</text>
+  <text x="600" y="174" text-anchor="middle" font-size="10" fill="#5b6878">Public tracking page</text>
+  <rect x="270" y="170" width="160" height="50" rx="8" fill="#fff" stroke="#b8c4d3"/>
+  <text x="350" y="192" text-anchor="middle" font-size="10" fill="#1d2733">Road provider (ORS or OSRM)</text>
+  <text x="350" y="208" text-anchor="middle" font-size="9.5" fill="#5b6878">distance, drive time, ETA</text>
+  <line x1="182" y1="100" x2="266" y2="100" stroke="#5b6878" stroke-width="2"/>
+  <line x1="432" y1="90" x2="516" y2="62" stroke="#5b6878" stroke-width="2"/>
+  <line x1="432" y1="112" x2="516" y2="152" stroke="#5b6878" stroke-width="2"/>
+  <line x1="350" y1="142" x2="350" y2="166" stroke="#5b6878" stroke-width="2"/>
+</svg>
+<figcaption>Figure 8. Location samples flow to the server, which keeps the latest position and updates ETAs. Road providers are used only when configured.</figcaption>
+</figure>
+
+<h3>12.1 What the screens show</h3>
+<ul>
+<li><strong>Location and ETA</strong> (delivery drawer): the last shared driver location with its time, and the ETA. If nothing has been shared, the screen says "No location has been shared."</li>
+<li><strong>Route and stops</strong>: road distance, driving time, next-stop ETA, and the itinerary in order.</li>
+<li><strong>Update ETA</strong> (broker): a manual adjustment when you know more than the estimate, for example after a loading delay.</li>
+<li><strong>Driver sync</strong>: whether the driver's device is currently sending updates.</li>
+</ul>
+
+<h3>12.2 Limits you should understand</h3>
+<div class="box warn">
+<ul>
+<li>ETA is an estimate. It does not model loading time, receiving restrictions or access problems.</li>
+<li>Browser sharing stops if the phone locks or the browser closes. Stale locations are not presented as live.</li>
+<li>ETA is recalculated after accepted location updates, at most once per minute, and only when a road provider is configured.</li>
+</ul></div>
+
+<h3>12.3 Recipient tracking link</h3>
+<p>A broker or the driver can copy a <strong>Recipient tracking link</strong>. It opens the public <em>YYC delivery tracking</em> page for the receiving party, showing the scheduled pickup or redelivery and progress. Links need the operator's <code>PUBLIC_ORIGIN</code> to be set. Share the link only with the people who should see the delivery.</p>
+
+<!-- ============ 13 ANDROID ============ -->
+<div class="page-break"></div>
+<h2>13. Android companion app</h2>
+<p>The Android app, <strong>YYC Driver</strong>, sends GPS updates for one assigned delivery from a foreground service. It keeps running when you lock the screen or close the browser, subject to phone settings. It is a companion: all job actions still happen in the web workspace.</p>
+
+<figure>
+<svg viewBox="0 0 700 170" role="img" aria-label="Pairing steps">
+  <rect x="10" y="10" width="680" height="150" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <g>
+    <circle cx="70" cy="60" r="18" fill="#1f5fae"/><text x="70" y="66" text-anchor="middle" font-size="14" font-weight="bold" fill="#fff">1</text>
+    <text x="70" y="100" text-anchor="middle" font-size="10.5" fill="#1d2733">Web: Pair Android phone</text>
+    <text x="70" y="116" text-anchor="middle" font-size="10" fill="#5b6878">code valid 5 min</text>
+    <circle cx="240" cy="60" r="18" fill="#1f5fae"/><text x="240" y="66" text-anchor="middle" font-size="14" font-weight="bold" fill="#fff">2</text>
+    <text x="240" y="100" text-anchor="middle" font-size="10.5" fill="#1d2733">App: enter origin,</text>
+    <text x="240" y="116" text-anchor="middle" font-size="10" fill="#5b6878">code and phone name</text>
+    <circle cx="410" cy="60" r="18" fill="#1f5fae"/><text x="410" y="66" text-anchor="middle" font-size="14" font-weight="bold" fill="#fff">3</text>
+    <text x="410" y="100" text-anchor="middle" font-size="10.5" fill="#1d2733">Grant location and</text>
+    <text x="410" y="116" text-anchor="middle" font-size="10" fill="#5b6878">notification permission</text>
+    <circle cx="580" cy="60" r="18" fill="#1f5fae"/><text x="580" y="66" text-anchor="middle" font-size="14" font-weight="bold" fill="#fff">4</text>
+    <text x="580" y="100" text-anchor="middle" font-size="10.5" fill="#1d2733">Start sharing from</text>
+    <text x="580" y="116" text-anchor="middle" font-size="10" fill="#5b6878">the visible app</text>
+  </g>
+  <line x1="92" y1="60" x2="218" y2="60" stroke="#5b6878" stroke-width="1.5"/>
+  <line x1="262" y1="60" x2="388" y2="60" stroke="#5b6878" stroke-width="1.5"/>
+  <line x1="432" y1="60" x2="558" y2="60" stroke="#5b6878" stroke-width="1.5"/>
+</svg>
+<figcaption>Figure 9. Pairing is a one-time, five-minute code. Sharing must be started from the visible app.</figcaption>
+</figure>
+
+<h3>13.1 Pair and run</h3>
+<ol>
+<li>Sign in on the web workspace as the approved driver and open the assigned, active delivery.</li>
+<li>Under <strong>Background location sharing</strong>, choose <strong>Pair Android phone</strong>. Note the one-time code before it expires (five minutes).</li>
+<li>In YYC Driver, enter the workspace address (HTTPS), the code and a phone name, then tap <strong>Pair this phone</strong>.</li>
+<li>Tap <strong>Start background location sharing</strong> while the app is open. Grant location (precise is recommended for better ETAs) and notification permissions.</li>
+<li>A persistent notification shows the delivery and a <strong>Stop sharing</strong> action. Closing the browser or locking the screen does not stop it.</li>
+</ol>
+
+<h3>13.2 Stopping and disconnecting</h3>
+<ul>
+<li><strong>Stop location sharing</strong> pauses the service.</li>
+<li><strong>Disconnect this phone</strong> clears the stored token and asks the server to revoke it.</li>
+<li>Pairing a new phone revokes the previous one for the same driver and delivery.</li>
+<li>Completing the delivery, losing the assignment, account disable, password recovery or database restore all revoke the device.</li>
+<li>Brokers and drivers can revoke a device from the delivery drawer.</li>
+</ul>
+
+<div class="box warn"><strong>Battery and vendor settings can stop tracking.</strong> Aggressive battery optimization, a force-stopped app, or a revoked permission will interrupt sharing. If it stops, reopen YYC Driver and press Start. Check the phone's location and battery settings for the app.</div>
+<p class="small">The app stores credentials encrypted in Android Keystore, excludes them from device backups, and keeps no password. Build and install instructions are in <code>mobile/android/README.md</code>; the Android build requires the Android SDK and JDK 17.</p>
+
+<!-- ============ 14 OFFLINE ============ -->
+<div class="page-break"></div>
+<h2>14. Offline work and sync</h2>
+<p>Drivers can keep working briefly without a connection. Actions are kept on the device and sent when the connection returns.</p>
+
+<figure>
+<svg viewBox="0 0 700 170" role="img" aria-label="Offline replay order">
+  <rect x="10" y="10" width="680" height="150" rx="10" fill="#fff" stroke="#d7dee8"/>
+  <g font-size="11" text-anchor="middle">
+    <rect x="30" y="50" width="150" height="60" rx="8" fill="#fdf3e1" stroke="#b7791f"/><text x="105" y="76" font-weight="bold" fill="#1d2733">1. Arrival</text><text x="105" y="94" fill="#5b6878">recorded offline</text>
+    <rect x="200" y="50" width="150" height="60" rx="8" fill="#fdf3e1" stroke="#b7791f"/><text x="275" y="76" font-weight="bold" fill="#1d2733">2. Proof file</text><text x="275" y="94" fill="#5b6878">attached</text>
+    <rect x="370" y="50" width="150" height="60" rx="8" fill="#fdf3e1" stroke="#b7791f"/><text x="445" y="76" font-weight="bold" fill="#1d2733">3. Delivery</text><text x="445" y="94" fill="#5b6878">confirmed</text>
+    <rect x="540" y="50" width="130" height="60" rx="8" fill="#e4f4ea" stroke="#237a4b"/><text x="605" y="76" font-weight="bold" fill="#1d2733">Server accepts</text><text x="605" y="94" fill="#5b6878">= confirmed</text>
+  </g>
+  <line x1="182" y1="80" x2="196" y2="80" stroke="#5b6878" stroke-width="2"/>
+  <line x1="352" y1="80" x2="366" y2="80" stroke="#5b6878" stroke-width="2"/>
+  <line x1="522" y1="80" x2="536" y2="80" stroke="#5b6878" stroke-width="2"/>
+  <text x="350" y="138" text-anchor="middle" font-size="10.5" fill="#5b6878">Saved on this device is not the same as confirmed by the server. Check sync status before treating offline work as recorded.</text>
+</svg>
+<figcaption>Figure 10. Offline completion replays in this order after pickup. Stopped replay means the broker changed the job; review it rather than forcing it through.</figcaption>
+</figure>
+
+<ul>
+<li>Offline, a driver can queue <strong>arrival</strong>, <strong>file attachment</strong> and <strong>delivery confirmation</strong>, in that order, after pickup.</li>
+<li>Evidence files are stored in account-scoped browser storage until they sync. Large files can use up browser storage.</li>
+<li>Completion stays <em>provisional</em> until the server accepts every queued action.</li>
+<li>If the broker changes the job before sync, replay stops for review. Newer instructions are never overwritten by an older offline version.</li>
+<li>The workspace refreshes automatically when connectivity returns, before and after syncing.</li>
+<li>Drafts (for example, a delivery receipt or recipient name) are kept in memory for the signed-in driver. They do not survive a full page reload, so finish entries before reloading.</li>
+</ul>
+
+<!-- ============ 15 OPERATIONS ============ -->
+<div class="page-break"></div>
+<h2>15. Operations: backups, recovery and the command line</h2>
+<p>This section is for the person who runs the server. Run commands from the project folder. Use <code>--env-file=.env</code> on a deployed server so commands target the same database as the running service.</p>
+
+<table>
+<tr><th>Task</th><th>Command</th></tr>
+<tr><td>Create the first broker (one-time token)</td><td><code>node --env-file=.env server/setup.js</code></td></tr>
+<tr><td>Provision an additional broker or recover access</td><td><code>node --env-file=.env server/create-admin.js</code> (uses ADMIN_* variables)</td></tr>
+<tr><td>Start the configured service</td><td><code>npm run start:configured</code></td></tr>
+<tr><td>Manual backup</td><td><code>npm run backup -- data/yyc.sqlite backups/yyc-snapshot.sqlite</code></td></tr>
+<tr><td>Restore to a new file</td><td><code>npm run restore -- backups/yyc-snapshot.sqlite data/yyc-restored.sqlite</code></td></tr>
+<tr><td>Scheduled backup run</td><td><code>npm run backup:scheduled</code></td></tr>
+<tr><td>Recovery drill</td><td><code>npm run recovery:drill</code></td></tr>
+<tr><td>Demo data (development only)</td><td><code>npm run seed</code></td></tr>
+</table>
+
+<h3>15.1 Backups</h3>
+<ul>
+<li>Backups use SQLite's consistent snapshot method, including committed write-ahead log contents, and check integrity and foreign keys.</li>
+<li>Both source and destination must be correct: commands refuse to overwrite an existing file or the source.</li>
+<li>Snapshot files are readable only by the service account (mode 0600). Keep them on persistent, access-controlled storage, and copy them off-host.</li>
+</ul>
+
+<h3>15.2 Restore</h3>
+<p>Restore validates the snapshot and keeps accounts, password hashes, shipments, booking keys and audit records. It clears sessions and password recovery tokens, so everyone signs in again. To switch the service, stop it, then start it against the restored file:</p>
+<pre>DATABASE_PATH=data/yyc-restored.sqlite npm start</pre>
+<div class="box warn"><strong>Practise a restore before you need one.</strong> Run a recovery drill on a copy and confirm you can sign in and see recent deliveries.</div>
+
+<h3>15.3 Account management (broker)</h3>
+<ul>
+<li>Use <strong>Accounts</strong> to view stores, drivers and other brokers.</li>
+<li>Disabling an account requires a reason. It revokes sessions and reset tokens, withdraws unaccepted offers, and records an audit event. Accepted jobs stay assigned for review.</li>
+<li>You cannot disable your own account, and the last active broker is protected.</li>
+<li>To add a broker, choose <strong>Add broker account</strong>, enter the full name, email, contact phone and a password (entered twice), then select <strong>Create broker account</strong>. Every broker account has the full broker role.</li>
+</ul>
+
+<h3>15.4 Checks before going live</h3>
+<pre>npm test
+npm run lint
+npm run build
+npm run test:browser   # desktop and mobile acceptance</pre>
+<p class="small">Continuous integration runs lint, tests, the production build and browser acceptance on pushes and pull requests. Run the browser suite locally with <code>npx playwright install --with-deps chromium</code> the first time.</p>
+
+<!-- ============ 16 REFERENCE ============ -->
+<div class="page-break"></div>
+<h2>16. Reference</h2>
+
+<h3>16.1 Rules at a glance</h3>
+<table>
+<tr><th>Topic</th><th>Rule</th></tr>
+<tr><td>Quotation</td><td>Valid 48 hours. Store must accept the current version.</td></tr>
+<tr><td>Job offer</td><td>Expires after 1 hour if unanswered.</td></tr>
+<tr><td>Driver eligibility</td><td>Approved driver and truck, enough weight and pallets, liftgate if required, free pickup window, no undelivered live load.</td></tr>
+<tr><td>Pickup window</td><td>Flexible windows conflict with every other window that date; morning and afternoon can be reserved separately. No travel-time calculation.</td></tr>
+<tr><td>Amounts</td><td>Positive whole cents (for example $485.00). Fractional cents are rejected. Weight may be fractional.</td></tr>
+<tr><td>Proof</td><td>PNG, JPEG or PDF, up to 2 MiB; uploaded after arrival at the final destination.</td></tr>
+<tr><td>Completion</td><td>All stops done, no open exception, arrival recorded, fresh proof, receipt reference, recipient name.</td></tr>
+<tr><td>Driver rate after assignment</td><td>Proposed; the driver must accept.</td></tr>
+<tr><td>Passwords</td><td>Set by you (12–128 characters for operator-created accounts). Recovery links expire after 30 minutes and work once.</td></tr>
+<tr><td>Login limits</td><td>Per account and connection address for 15 minutes; one account's failures do not lock others out.</td></tr>
+<tr><td>Registration limits</td><td>20 attempts per connection address per 15 minutes; limited concurrent password hashing.</td></tr>
+<tr><td>Booking requests</td><td>Protected by an idempotency key, so a retried request after a lost response returns the same booking, not a duplicate.</td></tr>
+<tr><td>Refresh</td><td>Every ten seconds while visible, and on focus or reconnect.</td></tr>
+<tr><td>Money</td><td>The app records; it does not transfer money.</td></tr>
+</table>
+
+<h3>16.2 Troubleshooting</h3>
+<table>
+<tr><th>Symptom</th><th>What to check</th></tr>
+<tr><td>"Set up broker account" is missing</td><td>Setup closes after the first broker exists. Ask a broker to add you under Accounts.</td></tr>
+<tr><td>Setup token rejected</td><td>Tokens expire after 30 minutes. Issue a new one with <code>server/setup.js</code>.</td></tr>
+<tr><td>Driver cannot accept jobs</td><td>Driver and truck both need approval. Check Approvals, and whether the truck is still valid.</td></tr>
+<tr><td>Job cannot be offered to a driver</td><td>Review driver availability; the reason is listed for each driver.</td></tr>
+<tr><td>"Accept job" is blocked</td><td>The screen shows the blocker, such as an expired approval or a clash with another live load.</td></tr>
+<tr><td>Cannot confirm pickup or delivery</td><td>Look for an open exception, incomplete stops, missing arrival, or proof uploaded before pickup.</td></tr>
+<tr><td>Version conflict message</td><td>Someone else changed the record. Review the refreshed details; your draft is preserved.</td></tr>
+<tr><td>No location shown</td><td>Driver must start sharing in the browser or the Android app. Check permissions.</td></tr>
+<tr><td>ETA missing</td><td>Road provider not configured, or no accepted location yet.</td></tr>
+<tr><td>Android sharing stopped</td><td>Reopen YYC Driver and press Start. Check battery optimization and location permission.</td></tr>
+<tr><td>Offline action still pending</td><td>It is not yet confirmed. Keep the app open with connectivity until sync completes.</td></tr>
+<tr><td>Login works on one machine but not the server</td><td>Accounts were created in a different database. Use the same <code>DATABASE_PATH</code> for setup and the service.</td></tr>
+<tr><td>Server refuses to start</td><td>Read the message. Production requires a valid HTTPS <code>PUBLIC_ORIGIN</code>, <code>COOKIE_SECURE=true</code>, persistent database and valid backup settings.</td></tr>
+</table>
+
+<h3>16.3 Glossary</h3>
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>Broker</td><td>Brokerage staff account with full operational rights (internal role "admin").</td></tr>
+<tr><td>Customer price</td><td>What the store pays. Visible to the store and broker only.</td></tr>
+<tr><td>Driver rate</td><td>What the driver is paid for the job. Visible to the driver and broker only.</td></tr>
+<tr><td>Quotation</td><td>The broker's offer of a customer price and driver rate for a specific request version.</td></tr>
+<tr><td>Offer</td><td>A job sent to one driver, which expires after an hour.</td></tr>
+<tr><td>Assignment</td><td>A driver has accepted responsibility for the job.</td></tr>
+<tr><td>Handover</td><td>Transfer of responsibility to a replacement driver, completed only when they accept.</td></tr>
+<tr><td>Exception (issue)</td><td>A reported problem that blocks progress until the broker resolves it.</td></tr>
+<tr><td>Owner request</td><td>A store's request to change, review or cancel a delivery.</td></tr>
+<tr><td>Evidence</td><td>Files (photo, signature, receipt) uploaded to support delivery or return.</td></tr>
+<tr><td>Recipient link</td><td>A public tracking page for the receiving party.</td></tr>
+<tr><td>Ledger entry</td><td>A recorded invoice, payment, refund, adjustment or payout.</td></tr>
+</table>
+
+<div class="box ok"><strong>Where to go next.</strong> Start with Sections 5 and 6 to learn your sidebar, then follow the guide for your role. The shortest path to a first delivery: store requests → broker quotes → store accepts → broker offers → driver accepts, records arrival and pickup, uploads proof and confirms delivery → broker invoices.</div>
+
+<p class="small" style="margin-top:14pt">YYC Brokers · Complete Tutorial. This guide describes the app's behaviour as implemented in the current source. Labels, limits and features may change in later releases; check the in-app guidance when in doubt.</p>
+
+</body>
+</html>

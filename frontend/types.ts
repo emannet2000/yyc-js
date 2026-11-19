@@ -22,7 +22,13 @@ export interface User {
   role: Role;
   approved: boolean;
   disabled: boolean;
-  profile: { address: string; contact: string; phone: string; reviewReason?: string };
+  profile: {
+    address: string;
+    contact: string;
+    phone: string;
+    reviewReason?: string;
+    savedAddresses?: { label: string; address: string; contact: string }[];
+  };
   truck: Truck | null;
 }
 export interface Quote {

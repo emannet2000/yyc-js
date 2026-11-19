@@ -6,6 +6,7 @@ export function Field({
   value,
   required = true,
   autoComplete,
+  list,
 }: {
   name: string;
   id?: string;
@@ -14,6 +15,7 @@ export function Field({
   value?: string | number;
   required?: boolean;
   autoComplete?: string;
+  list?: string;
 }) {
   return (
     <div className="field">
@@ -24,6 +26,7 @@ export function Field({
         type={type}
         defaultValue={value}
         required={required}
+        list={list}
         {...(type === 'number'
           ? {
               min:

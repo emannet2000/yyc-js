@@ -22,6 +22,8 @@ npm run setup
 
 Open the login page, choose **Set up broker account**, enter the token, and choose your own broker name, contact phone, email, and password. The token expires after 30 minutes, is stored as a hash, and is consumed when the first broker is created. Setup closes after the first broker account exists, including when that account is disabled. Public store/driver registration cannot create broker accounts. There are no default credentials. Keep the token private.
 
+To create the first broker automatically at startup instead, set `ADMIN_EMAIL` and `ADMIN_PASSWORD` (12–128 characters, required together) and optionally `ADMIN_NAME` and `ADMIN_PHONE`. When the server starts and no broker exists, it creates that account and logs a confirmation. Once any broker exists, these variables are ignored, so remove `ADMIN_PASSWORD` from `.env` after the first start. Do not commit the password.
+
 Operators can still provision additional brokers or recover access with `npm run create-admin`, using `ADMIN_EMAIL`, `ADMIN_PASSWORD` (12–128 characters), `ADMIN_NAME`, and `ADMIN_PHONE`. With a deployed `.env`, use `node --env-file=.env server/create-admin.js` so provisioning targets the same database as the service. Do not send passwords through chat or commit them to source control.
 
 The default database is `data/yyc.sqlite`. Set `DATABASE_PATH` to use another file; parent directories and an empty schema are created automatically. Existing rows are preserved. Tests use isolated databases and never change the workspace database.

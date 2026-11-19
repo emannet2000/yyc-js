@@ -6,9 +6,18 @@ import {
   type DriverShare,
   type CargoDriver,
 } from './PayoutAllocations';
+import { locationStatus } from './locationStatus';
+import { LiveMapView } from './LiveMapView';
+import { trailFromHistory } from './locationTrail';
 import { useUiStore } from './stores/useUiStore';
 import { useTracking } from './tracking';
-import { useEffect, useState, type RefObject, type FormEvent } from 'react';
+import {
+  useEffect,
+  useState,
+  type RefObject,
+  type FormEvent,
+  type MouseEvent,
+} from 'react';
 import { api } from './api';
 import { useAppStore } from './stores/useAppStore';
 import { Field } from './Field';
@@ -315,7 +324,12 @@ export function EvidenceFiles({
   const [message, setMessage] = useState('');
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const file = new FormData(event.currentTarget).get('file') as File;
+    const data = new FormData(event.currentTarget);
+    // Either the file picker or the camera input may hold the file.
+    const picked = [data.get('file'), data.get('photo')].find(
+      (f): f is File => f instanceof File && f.size > 0,
+    );
+    const file = (picked ?? data.get('file')) as File;
     if (!file || file.size === 0 || file.size > 2 * 1024 * 1024) {
       setMessage('Choose a nonempty PNG, JPEG, or PDF up to 2 MiB.');
       return;
@@ -363,7 +377,15 @@ export function EvidenceFiles({
               name="file"
               type="file"
               accept="image/png,image/jpeg,application/pdf"
-              required
+            />
+          </label>
+          <label>
+            Or take a photo with the camera
+            <input
+              name="photo"
+              type="file"
+              accept="image/png,image/jpeg"
+              capture="environment"
             />
           </label>
           <p>
@@ -596,9 +618,27 @@ function InvoiceCard({
       }
     }, 'Financial entry recorded.');
   }
+  function printInvoice(event: MouseEvent<HTMLButtonElement>) {
+    // Print only this invoice. The print stylesheet hides everything else.
+    const card = event.currentTarget.closest('article');
+    if (!card) return;
+    card.classList.add('invoice-print-target');
+    document.body.classList.add('printing-invoice');
+    const done = () => {
+      card.classList.remove('invoice-print-target');
+      document.body.classList.remove('printing-invoice');
+    };
+    window.addEventListener('afterprint', done, { once: true });
+    window.print();
+  }
   return (
     <article className="card">
-      <h2>{i.shipmentId}</h2>
+      <div className="invoice-print-head">
+        <h2>{i.shipmentId}</h2>
+        <button type="button" className="btn light" onClick={printInvoice}>
+          Print or save as PDF
+        </button>
+      </div>
       <p>{i.id}</p>
       <p>
         {user.role === 'driver' ? 'Allocated driver share' : 'Invoice total'}:{' '}
@@ -877,6 +917,12 @@ export function OperationsPage({
 
 interface Tracking {
   driverId?: string;
+  arrivalPrompt?: {
+    target: string;
+    kind: 'arrival' | 'stop';
+    label: string;
+    distanceM: number;
+  } | null;
   latitude?: number;
   longitude?: number;
   accuracy?: number;
@@ -897,6 +943,10 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
     `/api/shipments/${s.id}/tracking`,
     `${revision}:${s.version}`,
   );
+  const { value: track } = useResource<{
+    points: { latitude: number; longitude: number }[];
+  }>(`/api/shipments/${s.id}/tracking/history`, `${revision}:${s.version}`);
+  const history = track ? trailFromHistory(track.points) : undefined;
   const active = ['Assigned', ...cargoStates].includes(s.status),
     assigned = user.role === 'driver' && s.driverId === user.id;
   useEffect(() => {
@@ -907,18 +957,49 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
     <section className="card">
       <h2>Location and ETA</h2>
       {(error || loadError) && <p role="alert">{error || loadError}</p>}
+      {assigned && value?.arrivalPrompt && (
+        <div className="arrival-prompt notice" role="status">
+          {value.arrivalPrompt.kind === 'stop' ? (
+            <p>
+              You are about {value.arrivalPrompt.distanceM} m from{' '}
+              {value.arrivalPrompt.label}. Open the delivery to complete this stop when
+              you are there.
+            </p>
+          ) : (
+            <>
+              <p>
+                You are about {value.arrivalPrompt.distanceM} m from the{' '}
+                {value.arrivalPrompt.label}. Record arrival now?
+              </p>
+              <button
+                type="button"
+                className="btn light"
+                onClick={() =>
+                  void useAppStore.getState().act(s.id, s.version, 'arrival', {})
+                }
+              >
+                Record arrival
+              </button>
+            </>
+          )}
+          <small>This is a suggestion from your GPS. Only act when you are there.</small>
+        </div>
+      )}
       {value?.recordedAt && value.driverId === s.driverId ? (
         <>
           <p>
-            Last shared: {new Date(value.recordedAt).toLocaleString()} · Accuracy ±
+            {locationStatus(value, s.driverId, Date.now()).message} · Last shared:{' '}
+            {new Date(value.recordedAt).toLocaleString()} · Accuracy ±
             {Math.round(value.accuracy || 0)} m
           </p>
-          <iframe
-            className="livemap-frame"
-            src={`https://www.openstreetmap.org/export/embed.html?bbox=${value.longitude! - 0.02},${value.latitude! - 0.015},${value.longitude! + 0.02},${value.latitude! + 0.015}&layer=mapnik&marker=${value.latitude},${value.longitude}`}
+          <LiveMapView
+            key={s.id}
+            history={history}
+            latitude={value.latitude!}
+            longitude={value.longitude!}
+            accuracy={value.accuracy}
+            stale={locationStatus(value, s.driverId, Date.now()).state === 'stale'}
             title="Last shared driver location"
-            loading="lazy"
-            referrerPolicy="no-referrer"
           />
           <a
             href={`https://www.openstreetmap.org/?mlat=${value.latitude}&mlon=${value.longitude}#map=15/${value.latitude}/${value.longitude}`}
@@ -929,7 +1010,10 @@ export function LocationTracker({ s, user }: { s: Shipment; user: User }) {
           </a>
         </>
       ) : (
-        <p>No location has been shared.</p>
+        <p>
+          No location has been shared yet. The driver must press Share current location or
+          pair the YYC Driver app; the map appears here after the first point.
+        </p>
       )}
       {value?.eta && !s.arrivedAt && s.status !== 'Delivery failed' && (
         <p>

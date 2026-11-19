@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { createLiveEvents } from './live-events.js';
 import { DatabaseSync } from 'node:sqlite';
 import {
   randomBytes,
@@ -127,6 +128,7 @@ export function createApplication({
   sendResetLink = null,
   sendNotification = null,
   calculateRoute = null,
+  geocode = null,
   now = Date.now,
 } = {}) {
   if (databasePath !== ':memory:') mkdirSync(dirname(databasePath), { recursive: true });
@@ -340,7 +342,8 @@ export function createApplication({
         id,
         storeId,
       );
-    if (result.changes !== 1) throw Object.assign(new Error('Shipment not found'), { status: 500 });
+    if (result.changes !== 1)
+      throw Object.assign(new Error('Shipment not found'), { status: 500 });
   }
   function scheduleInput(data) {
     const date = text(data, 'date'),
@@ -437,6 +440,16 @@ export function createApplication({
       'Truck plate is already registered.',
     );
   }
+  // Optional YYYY-MM-DD date; empty means not recorded.
+  function optionalDate(data, key) {
+    const value = text(data, key, true);
+    requireThat(
+      !value || (/^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value))),
+      400,
+      'Enter compliance dates as YYYY-MM-DD.',
+    );
+    return value;
+  }
   async function register(data, admin = false, setupToken = null) {
     const role = admin ? 'admin' : choice(data, 'role', roles);
     const name = text(data, 'name'),
@@ -461,6 +474,9 @@ export function createApplication({
             pallets: positive(data, 'pallets', true),
             area: text(data, 'area'),
             liftgate: data.liftgate === true,
+            licenceExpires: optionalDate(data, 'licenceExpires'),
+            insuranceExpires: optionalDate(data, 'insuranceExpires'),
+            inspectionExpires: optionalDate(data, 'inspectionExpires'),
           }
         : null;
     const value = password(data);
@@ -934,6 +950,7 @@ export function createApplication({
   }
   const operations = createOperations({
     db,
+    geocode,
     now,
     text,
     positive,
@@ -975,10 +992,18 @@ export function createApplication({
     mobility,
   });
   const workflow = createWorkflow({ now, requireThat, text, positive, money });
+  const events = createLiveEvents();
   const server = createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self'; " +
+        "font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; " +
+        "frame-ancestors 'none'",
+    );
     if (secureCookies) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     try {
       let path;
@@ -1186,6 +1211,13 @@ export function createApplication({
         return;
       }
       requireThat(current, 401, 'Log in to continue.');
+      if (path === '/api/events' && req.method === 'GET') {
+        requireThat(events.subscribe(req, res), 503, 'Too many live connections.');
+        return;
+      }
+      // Tell open browsers to refresh after any successful change.
+      if (write && typeof res.on === 'function')
+        res.on('finish', () => res.statusCode < 300 && events.publish());
       if (write)
         requireThat(
           req.headers['x-csrf-token'] === current.csrf,
@@ -1285,6 +1317,69 @@ export function createApplication({
           await mobility.autoRoute(location[1], user);
         return;
       }
+      if (path === '/api/availability' && req.method === 'PATCH') {
+        requireThat(user.role === 'driver', 403, 'Only drivers can set availability.');
+        const dates = data.dates;
+        requireThat(
+          Array.isArray(dates) &&
+            dates.length <= 366 &&
+            dates.every(
+              (d) =>
+                typeof d === 'string' &&
+                /^\d{4}-\d{2}-\d{2}$/.test(d) &&
+                !Number.isNaN(Date.parse(d)),
+            ),
+          400,
+          'Enter unavailable dates as YYYY-MM-DD, up to 366 dates.',
+        );
+        const row = db
+          .prepare('SELECT id,profile FROM trucks WHERE driver_id=?')
+          .get(user.id);
+        requireThat(row, 409, 'Register a truck before setting availability.');
+        const unavailableDates = [...new Set(dates)].sort();
+        const profile = JSON.parse(row.profile);
+        profile.unavailableDates = unavailableDates;
+        db.prepare('UPDATE trucks SET profile=? WHERE id=?').run(
+          JSON.stringify(profile),
+          row.id,
+        );
+        send(res, 200, { unavailableDates });
+        return;
+      }
+      if (path === '/api/saved-addresses' && req.method === 'PATCH') {
+        requireThat(user.role === 'store', 403, 'Only stores can save addresses.');
+        const list = data.addresses;
+        requireThat(
+          Array.isArray(list) && list.length <= 20,
+          400,
+          'Save up to 20 addresses.',
+        );
+        const addresses = list.map((entry) => {
+          requireThat(
+            entry && typeof entry === 'object',
+            400,
+            'Each address needs details.',
+          );
+          const label = text(entry, 'label'),
+            address = text(entry, 'address'),
+            contact = text(entry, 'contact', true);
+          requireThat(
+            label.length >= 1 &&
+              label.length <= 60 &&
+              address.length >= 1 &&
+              address.length <= 300,
+            400,
+            'Each saved address needs a label (up to 60 characters) and an address (up to 300).',
+          );
+          return { label, address, contact };
+        });
+        db.prepare('UPDATE users SET profile=? WHERE id=?').run(
+          JSON.stringify({ ...user.profile, savedAddresses: addresses }),
+          user.id,
+        );
+        send(res, 200, { savedAddresses: addresses });
+        return;
+      }
       if (path === '/api/profile' && req.method === 'PATCH') {
         requireThat(user.role === 'store', 403, 'Only stores can edit this profile.');
         const name = text(data, 'name'),
@@ -1292,6 +1387,10 @@ export function createApplication({
             phone: text(data, 'phone'),
             address: text(data, 'address'),
             contact: text(data, 'contact'),
+            // Keep the saved address book when the main profile is edited.
+            ...(user.profile.savedAddresses
+              ? { savedAddresses: user.profile.savedAddresses }
+              : {}),
           };
         db.prepare('UPDATE users SET name=?,profile=? WHERE id=?').run(
           name,
@@ -1502,6 +1601,8 @@ export function createApplication({
     server,
     processNotifications: operations.processNotifications,
     expire: operations.expire,
+    closeStreams: () => events.closeAll(),
+    pruneTrackingHistory: operations.pruneTrackingHistory,
     close: () => db.close(),
     createSetupToken() {
       requireThat(
@@ -1518,5 +1619,6 @@ export function createApplication({
       return token;
     },
     createAdmin: (data) => register(data, true),
+    hasBroker: () => !!db.prepare("SELECT 1 FROM users WHERE role='admin'").get(),
   };
 }

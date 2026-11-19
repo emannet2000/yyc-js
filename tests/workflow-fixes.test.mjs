@@ -274,7 +274,10 @@ test('finalArrivalVersion survives redeliver so first-attempt evidence retains i
   await action(f.driver, id, 'arrival');
   await attachDeliveryEvidence(f.driver, id);
   const arrived = await current(f.admin, id);
-  assert.ok(arrived.finalArrivalVersion, 'finalArrivalVersion must be set after evidence upload');
+  assert.ok(
+    arrived.finalArrivalVersion,
+    'finalArrivalVersion must be set after evidence upload',
+  );
   await action(f.driver, id, 'failDelivery', {
     reason: 'Nobody home',
     note: 'Left a card',
@@ -300,8 +303,10 @@ test('change clears stale quoteExpiresAt and offerExpiresAt so revised shipments
   for (const status of ['Quote ready', 'Offered', 'Assigned']) {
     const id = await prepare(f, status);
     const before = await current(f.admin, id);
-    if (status === 'Quote ready') assert.ok(before.quoteExpiresAt, 'quoteExpiresAt present before change');
-    if (status === 'Offered') assert.ok(before.offerExpiresAt, 'offerExpiresAt present before change');
+    if (status === 'Quote ready')
+      assert.ok(before.quoteExpiresAt, 'quoteExpiresAt present before change');
+    if (status === 'Offered')
+      assert.ok(before.offerExpiresAt, 'offerExpiresAt present before change');
     await action(f.admin, id, 'change', {
       destination: 'Revised destination 2099',
       kg: 900,
@@ -310,8 +315,16 @@ test('change clears stale quoteExpiresAt and offerExpiresAt so revised shipments
     });
     const after = await current(f.admin, id);
     assert.equal(after.status, 'Awaiting quote');
-    assert.equal(after.quoteExpiresAt, undefined, 'quoteExpiresAt must be cleared by change');
-    assert.equal(after.offerExpiresAt, undefined, 'offerExpiresAt must be cleared by change');
+    assert.equal(
+      after.quoteExpiresAt,
+      undefined,
+      'quoteExpiresAt must be cleared by change',
+    );
+    assert.equal(
+      after.offerExpiresAt,
+      undefined,
+      'offerExpiresAt must be cleared by change',
+    );
   }
 });
 

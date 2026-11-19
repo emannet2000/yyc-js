@@ -11,7 +11,10 @@ export function releaseDriverOffer(shipment) {
   delete shipment.offerExpiresAt;
   delete shipment.handover;
   if (shipment.status === 'Offered') shipment.status = 'Ready to assign';
-  if (shipment.rateChange && ![shipment.driverId, prevOfferedTo].includes(shipment.rateChange.driverId))
+  if (
+    shipment.rateChange &&
+    ![shipment.driverId, prevOfferedTo].includes(shipment.rateChange.driverId)
+  )
     delete shipment.rateChange;
 }
 

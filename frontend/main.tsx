@@ -17,6 +17,11 @@ import { ActionForm } from './ActionForm';
 import { eligibleActionDrafts } from './actionDrafts';
 import { dataFrom } from './forms';
 import { DeliveryEvidence } from './DeliveryEvidence';
+import { locationStatus } from './locationStatus';
+import { LiveMapView } from './LiveMapView';
+import { AvailabilityForm } from './Availability';
+import { SavedAddressesForm } from './SavedAddresses';
+import { trailFromHistory, type TrailPoint } from './locationTrail';
 import { Setup } from './Setup';
 import { CustomerRequests } from './CustomerRequests';
 import { RateChange } from './RateChange';
@@ -125,6 +130,7 @@ function LiveMap({
     eta?: string;
     driverId?: string;
   } | null>(null);
+  const [history, setHistory] = useState<TrailPoint[] | undefined>(undefined);
 
   const activeShipments = shipments.filter(
     (s) =>
@@ -139,12 +145,20 @@ function LiveMap({
   useEffect(() => {
     if (!target) {
       setTracking(null);
+      setHistory(undefined);
       return;
     }
     let cancelled = false;
     void api<typeof tracking>(`/api/shipments/${target.id}/tracking`)
       .then((v) => {
         if (!cancelled) setTracking(v);
+      })
+      .catch(() => {});
+    void api<{ points: { latitude: number; longitude: number }[] }>(
+      `/api/shipments/${target.id}/tracking/history`,
+    )
+      .then((v) => {
+        if (!cancelled) setHistory(trailFromHistory(v.points));
       })
       .catch(() => {});
     return () => {
@@ -157,40 +171,72 @@ function LiveMap({
     return () => clearInterval(timer);
   }, []);
 
-  const hasLocation =
-    tracking?.latitude != null &&
-    tracking?.longitude != null &&
-    tracking.driverId === target?.driverId;
+  const status = locationStatus(tracking, target?.driverId, Date.now());
 
-  if (!target || !hasLocation) {
+  if (!target) {
     return (
       <div className="unconnectedmap">
         <h2>Live delivery map</h2>
         <p>
           {activeShipments.length
-            ? 'Waiting for the assigned driver to share their GPS location.'
+            ? 'Select an active delivery to see where its driver is.'
             : 'Open a delivery to view its location, milestones, and ETA.'}
         </p>
       </div>
     );
   }
 
+  if (status.state === 'none' || status.state === 'previous-driver') {
+    return (
+      <div className="unconnectedmap">
+        <h2>Live delivery map</h2>
+        <p>{status.message}</p>
+        <p className="small">
+          Delivery {target.id}. The map appears once the assigned driver shares a
+          location:
+        </p>
+        <ol className="map-steps">
+          <li>
+            The driver opens this delivery and presses <b>Share current location</b>, or
+            pairs the YYC Driver app.
+          </li>
+          <li>
+            They allow location permission. The workspace must be opened over HTTPS.
+          </li>
+          <li>The first point appears here within about 30 seconds.</li>
+        </ol>
+        {!window.isSecureContext && (
+          <p className="notice">
+            This page is not secure (not HTTPS), so phone browsers will not share
+            location.
+          </p>
+        )}
+        <button className="btn light" onClick={() => setRevision((v) => v + 1)}>
+          Check again
+        </button>
+      </div>
+    );
+  }
+
   const lat = tracking!.latitude!;
   const lon = tracking!.longitude!;
-  const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${lon - 0.02},${lat - 0.015},${lon + 0.02},${lat + 0.015}&layer=mapnik&marker=${lat},${lon}`;
   const openUrl = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=15/${lat}/${lon}`;
 
   return (
     <div className="livemap">
       <div className="livemap-header">
-        <span className="livemap-beacon" aria-hidden="true">◎</span>
+        <span className="livemap-beacon" aria-hidden="true">
+          ◎
+        </span>
         <div>
           <strong>Live location · {target.id}</strong>
           <span className="livemap-status">
+            {status.message}
             {tracking!.recordedAt
-              ? `Last update: ${new Date(tracking!.recordedAt).toLocaleTimeString()}`
-              : 'Location active'}
-            {tracking!.eta && !['Delivered', 'Returned', 'Cancelled'].includes(target.status)
+              ? ` · ${new Date(tracking!.recordedAt).toLocaleTimeString()}`
+              : ''}
+            {tracking!.eta &&
+            !['Delivered', 'Returned', 'Cancelled'].includes(target.status)
               ? ` · ETA ${new Date(tracking!.eta).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
               : ''}
           </span>
@@ -199,19 +245,34 @@ function LiveMap({
           Open full map ↗
         </a>
       </div>
-      <iframe
-        className="livemap-frame"
-        src={mapUrl}
+      <LiveMapView
+        key={target.id}
+        history={history}
+        latitude={lat}
+        longitude={lon}
+        accuracy={tracking!.accuracy}
+        stale={status.state === 'stale'}
         title={`Live location for ${target.id}`}
-        loading="lazy"
-        referrerPolicy="no-referrer"
       />
+      {status.state === 'stale' && (
+        <p className="notice livemap-stale" role="status">
+          The position below may be out of date. Ask the driver to check that sharing is
+          on.
+        </p>
+      )}
       <div className="livemap-footer">
         <span>±{Math.round(tracking!.accuracy ?? 0)} m accuracy</span>
+        <span>
+          {lat.toFixed(5)}, {lon.toFixed(5)}
+        </span>
         <span>
           {target.pickup} → {target.destination}
         </span>
       </div>
+      <p className="small">
+        Map tiles not loading? Use <b>Open full map ↗</b> above, or the coordinates shown
+        here.
+      </p>
     </div>
   );
 }
@@ -339,7 +400,9 @@ function Auth({
           </p>
           {setupRequired && (
             <section className="auth-setup-notice">
-              <div className="auth-setup-icon" aria-hidden="true">⚙</div>
+              <div className="auth-setup-icon" aria-hidden="true">
+                ⚙
+              </div>
               <div>
                 <strong>Workspace setup required</strong>
                 <p>
@@ -424,6 +487,24 @@ function Auth({
                     label="Truck type"
                     values={['Box truck', 'Dry van']}
                   />
+                  <Field
+                    name="licenceExpires"
+                    label="Driver licence expiry"
+                    type="date"
+                    required={false}
+                  />
+                  <Field
+                    name="insuranceExpires"
+                    label="Insurance expiry"
+                    type="date"
+                    required={false}
+                  />
+                  <Field
+                    name="inspectionExpires"
+                    label="Vehicle inspection expiry"
+                    type="date"
+                    required={false}
+                  />
                   <div className="grid2">
                     <Field name="kg" label="Payload capacity (kg)" type="number" />
                     <Field name="pallets" label="Pallet capacity" type="number" />
@@ -470,10 +551,16 @@ function Booking({
         <h2>Request a delivery</h2>
         <Form busy={busy} label="Submit delivery request" onSave={save}>
           <div className="grid2">
-            <Field name="pickup" label="Pickup address" />
+            <Field name="pickup" label="Pickup address" list="saved-addresses" />
+            <datalist id="saved-addresses">
+              {(user.profile.savedAddresses ?? []).map((a) => (
+                <option key={a.label} value={a.address} label={a.label} />
+              ))}
+            </datalist>
             <Field
               name="destination"
               label="Delivery address"
+              list="saved-addresses"
               value={user.profile.address}
             />
             <Field name="date" label="Pickup date" type="date" />
@@ -1431,31 +1518,42 @@ function App() {
                 <h2>{user.name}</h2>
                 <p>{user.email}</p>
                 {user.role === 'store' ? (
-                  <Form
-                    busy={busy}
-                    label="Save profile"
-                    onSave={(data) =>
-                      save(() => api('/api/profile', 'PATCH', data), 'Profile saved.')
-                    }
-                  >
-                    <Field name="name" label="Store / business name" value={user.name} />
-                    <Field
-                      name="address"
-                      label="Store delivery address"
-                      value={user.profile.address}
+                  <>
+                    <Form
+                      busy={busy}
+                      label="Save profile"
+                      onSave={(data) =>
+                        save(() => api('/api/profile', 'PATCH', data), 'Profile saved.')
+                      }
+                    >
+                      <Field
+                        name="name"
+                        label="Store / business name"
+                        value={user.name}
+                      />
+                      <Field
+                        name="address"
+                        label="Store delivery address"
+                        value={user.profile.address}
+                      />
+                      <Field
+                        name="contact"
+                        label="Receiving contact"
+                        value={user.profile.contact}
+                      />
+                      <Field
+                        name="phone"
+                        label="Contact phone"
+                        type="tel"
+                        value={user.profile.phone}
+                      />
+                    </Form>
+                    <SavedAddressesForm
+                      addresses={user.profile.savedAddresses ?? []}
+                      busy={busy}
+                      save={save}
                     />
-                    <Field
-                      name="contact"
-                      label="Receiving contact"
-                      value={user.profile.contact}
-                    />
-                    <Field
-                      name="phone"
-                      label="Contact phone"
-                      type="tel"
-                      value={user.profile.phone}
-                    />
-                  </Form>
+                  </>
                 ) : (
                   <>
                     <Badge
@@ -1478,6 +1576,16 @@ function App() {
                     </p>
                     {user.role === 'driver' && (
                       <DriverProfile user={user} busy={busy} save={save} />
+                    )}
+                    {user.role === 'driver' && (
+                      <AvailabilityForm
+                        dates={
+                          (user.truck as { unavailableDates?: string[] } | null)
+                            ?.unavailableDates ?? []
+                        }
+                        busy={busy}
+                        save={save}
+                      />
                     )}
                   </>
                 )}

@@ -6,9 +6,23 @@ import { archiveQuote } from './workflow.js';
 import { releaseDriverOffer } from './dispatch.js';
 import { currentDeliveryProof } from './delivery-evidence.js';
 import { publishedEta } from './tracking-eta.js';
+import {
+  arrivalSuggestion,
+  arrivalTarget,
+  arrivalTargetAddresses,
+  targetAddress,
+  targetLabel,
+} from './arrival.js';
+
+// A failed address lookup is not retried for this long.
+const GEOCODE_RETRY_MS = 10 * 60 * 1000;
+
+// Most recent accepted GPS samples kept per delivery.
+const TRACK_HISTORY_LIMIT = 500;
 
 export function createOperations({
   db,
+  geocode = null,
   now,
   text,
   positive,
@@ -24,6 +38,9 @@ export function createOperations({
   sendNotification,
 }) {
   db.exec(`CREATE TABLE IF NOT EXISTS tracking(shipment_id TEXT PRIMARY KEY REFERENCES shipments(id),data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS tracking_history(id INTEGER PRIMARY KEY AUTOINCREMENT,shipment_id TEXT NOT NULL REFERENCES shipments(id),driver_id TEXT NOT NULL REFERENCES users(id),latitude REAL NOT NULL,longitude REAL NOT NULL,accuracy REAL NOT NULL,recorded_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS tracking_history_shipment ON tracking_history(shipment_id,id);
+  CREATE TABLE IF NOT EXISTS arrival_targets(shipment_id TEXT PRIMARY KEY REFERENCES shipments(id),data TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS notifications(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),shipment_id TEXT REFERENCES shipments(id),message TEXT NOT NULL,created_at TEXT NOT NULL,read_at TEXT,delivery_status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER NOT NULL DEFAULT 0,lease_until INTEGER NOT NULL DEFAULT 0);
   CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id,created_at);
   CREATE TABLE IF NOT EXISTS booking_drafts(user_id TEXT PRIMARY KEY REFERENCES users(id),data TEXT NOT NULL,version INTEGER NOT NULL,updated_at TEXT NOT NULL);
@@ -276,6 +293,21 @@ export function createOperations({
   async function route(path, req, res, user, data, url) {
     const admin = () =>
       requireThat(user.role === 'admin', 403, 'Broker access required.');
+    const trackHistory = /^\/api\/shipments\/([^/]+)\/tracking\/history$/.exec(path);
+    if (trackHistory && req.method === 'GET') {
+      const s = shipments(user, trackHistory[1], false)[0];
+      requireThat(s, 404, 'Delivery not found.');
+      // Only the current driver's samples are shown; earlier drivers' routes are hidden.
+      const points = s.driverId
+        ? db
+            .prepare(
+              'SELECT latitude,longitude,accuracy,recorded_at AS recordedAt FROM (SELECT * FROM tracking_history WHERE shipment_id=? AND driver_id=? ORDER BY id DESC LIMIT 200) ORDER BY recordedAt ASC',
+            )
+            .all(s.id, s.driverId)
+        : [];
+      send(res, 200, { driverId: s.driverId ?? null, points });
+      return true;
+    }
     const tracking = /^\/api\/shipments\/([^/]+)\/tracking$/.exec(path);
     if (tracking) {
       const s = shipments(user, tracking[1], false)[0];
@@ -295,9 +327,30 @@ export function createOperations({
           ...visible
         } = current;
         const estimate = publishedEta(s, current, now());
+        // Arrival prompt: only when the stored target is known for the current address.
+        const target = arrivalTarget(s);
+        const stored = db
+          .prepare('SELECT data FROM arrival_targets WHERE shipment_id=?')
+          .get(s.id);
+        const point = target && stored ? JSON.parse(stored.data)[target] : null;
+        const arrivalPrompt =
+          target &&
+          point &&
+          point.address === targetAddress(s, target) &&
+          point.latitude != null
+            ? arrivalSuggestion({
+                target,
+                label: targetLabel(s, target),
+                point,
+                sample: current,
+                driverId: s.driverId,
+                now: now(),
+              })
+            : null;
         send(res, 200, {
           ...visible,
           ...estimate,
+          arrivalPrompt,
           ...(s.status === 'Delivery failed' ? { route: null } : {}),
         });
         return true;
@@ -347,6 +400,12 @@ export function createOperations({
           recordedAt,
           driverId: user.id,
         });
+        db.prepare(
+          'INSERT INTO tracking_history(shipment_id,driver_id,latitude,longitude,accuracy,recorded_at) VALUES (?,?,?,?,?,?)',
+        ).run(s.id, user.id, data.latitude, data.longitude, data.accuracy, recordedAt);
+        db.prepare(
+          'DELETE FROM tracking_history WHERE shipment_id=? AND id NOT IN (SELECT id FROM tracking_history WHERE shipment_id=? ORDER BY id DESC LIMIT ?)',
+        ).run(s.id, s.id, TRACK_HISTORY_LIMIT);
       } else if (req.method === 'PATCH') {
         requireThat(
           (user.role === 'admin' || (user.role === 'driver' && s.driverId === user.id)) &&
@@ -378,6 +437,7 @@ export function createOperations({
       db.prepare(
         'INSERT INTO tracking VALUES (?,?) ON CONFLICT(shipment_id) DO UPDATE SET data=excluded.data',
       ).run(s.id, JSON.stringify(current));
+      if (req.method === 'POST') void refreshArrivalTargets(s.id).catch(() => {});
       send(res, 200, { ok: true });
       return true;
     }
@@ -1044,9 +1104,48 @@ export function createOperations({
     }
     return false;
   }
+  // Looks up coordinates for the pickup and destination addresses, once per
+  // address. Runs in the background after a location update.
+  async function refreshArrivalTargets(id) {
+    if (!geocode) return;
+    const s = shipments({ role: 'admin' }, id, false)[0];
+    if (!s) return;
+    const row = db
+      .prepare('SELECT data FROM arrival_targets WHERE shipment_id=?')
+      .get(id);
+    const stored = row ? JSON.parse(row.data) : {};
+    let changed = false;
+    for (const [key, address] of arrivalTargetAddresses(s)) {
+      if (!address) continue;
+      const known = stored[key];
+      if (known?.address === address && known.latitude != null) continue;
+      if (known?.address === address && now() - known.failedAt < GEOCODE_RETRY_MS)
+        continue;
+      try {
+        const point = await geocode(address);
+        if (point) {
+          stored[key] = { address, latitude: point.latitude, longitude: point.longitude };
+        } else stored[key] = { address, failedAt: now() };
+      } catch {
+        stored[key] = { address, failedAt: now() };
+      }
+      changed = true;
+    }
+    if (changed)
+      db.prepare(
+        'INSERT INTO arrival_targets VALUES (?,?) ON CONFLICT(shipment_id) DO UPDATE SET data=excluded.data',
+      ).run(id, JSON.stringify(stored));
+  }
+  // Deletes location samples older than `days`. Returns the number removed.
+  function pruneTrackingHistory(days) {
+    const cutoff = new Date(now() - days * 86400000).toISOString();
+    return db.prepare('DELETE FROM tracking_history WHERE recorded_at < ?').run(cutoff)
+      .changes;
+  }
   return {
     route,
     expire,
+    pruneTrackingHistory,
     notifyShipment,
     notify,
     driverReview,

@@ -51,5 +51,17 @@ export function driverVehicleBlockers(shipment, driver) {
   if (!(truck.pallets >= shipment.pallets)) reasons.push('Pallet capacity too low');
   if (shipment.unloading.includes('Liftgate') && !truck.liftgate)
     reasons.push('Liftgate required');
+  if (shipment.date && (truck.unavailableDates || []).includes(shipment.date))
+    reasons.push('Unavailable on pickup date');
+  // A document that expires before the pickup date blocks the job. Missing dates
+  // do not block (older registrations have none); the approval screen shows them.
+  for (const [label, key] of [
+    ['Licence', 'licenceExpires'],
+    ['Insurance', 'insuranceExpires'],
+    ['Inspection', 'inspectionExpires'],
+  ]) {
+    if (truck[key] && shipment.date && truck[key] < shipment.date)
+      reasons.push(`${label} expired before pickup`);
+  }
   return reasons;
 }

@@ -4,7 +4,7 @@ A native companion for the existing delivery workspace. It pairs to one assigned
 
 ## Build
 
-Install Android Studio, Android SDK Platform 35, Build Tools 35.0.0, and JDK 17. Open this directory in Android Studio and sync, or set `ANDROID_HOME` to the SDK and run:
+Install Android Studio, Android SDK Platform 35, Build Tools 35.0.0, and JDK 17. Use a JDK 17 build that includes the November 2026 OpenJDK fix for CVE-2026-114938 (Java4Shell): Oracle 17.0.21.1 or later, or your vendor's equivalent. Earlier JDK 17 builds (17.0.6 and later on x86-64 CPUs with AVX-512 VBMI) are affected. Open this directory in Android Studio and sync, or set `ANDROID_HOME` to the SDK and run:
 
 ```sh
 ./gradlew --no-daemon :app:assembleDebug :app:lintDebug

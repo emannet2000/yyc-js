@@ -1282,6 +1282,7 @@ function App() {
       {message}
     </div>
   );
+  useEffect(() => { setDeliveryPage(0); }, [query, status, page]);
   if (recoveryMode) return <ResetPassword token={recoveryToken} />;
   if (loading)
     return (
@@ -1375,7 +1376,6 @@ function App() {
               a.id.localeCompare(b.id),
           )
         : filtered;
-  useEffect(() => { setDeliveryPage(0); }, [query, status, page]);
   const pageCount = Math.ceil(displayed.length / PAGE_SIZE);
   const pageSlice = displayed.slice(deliveryPage * PAGE_SIZE, (deliveryPage + 1) * PAGE_SIZE);
   const current = shipments.find((s) => s.id === selected);

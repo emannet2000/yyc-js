@@ -45,3 +45,8 @@ test-results/
 # OS files
 .DS_Store
 data/backups/
+
+node_modules/
+.env
+.env.*
+!.env.example

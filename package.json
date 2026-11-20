@@ -7,6 +7,7 @@
     "dev": "node scripts/dev.js",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "typecheck:server": "tsc --project tsconfig.server.json",
     "lint": "eslint frontend shared server tests scripts vite.config.ts playwright.config.js",
     "format:check": "prettier --check frontend shared server tests scripts vite.config.ts eslint.config.js package.json README.md CODE_REVIEW.md playwright.config.js .github/workflows",
     "preview": "vite preview",
@@ -27,6 +28,7 @@
     "config:check": "node server/config-check-cli.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.10.0",
     "@types/leaflet": "^1.9.22",
     "leaflet": "^1.9.4",
     "react": "19.3.1",

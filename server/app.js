@@ -14,6 +14,9 @@ import { dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLoginLimiter } from './login-limiter.js';
 import { createRegistrationLimiter } from './registration-limiter.js';
+import { createEvidenceLimiter } from './evidence-limiter.js';
+import { createShipmentLimiter } from './shipment-limiter.js';
+import { createLogger } from './logger.js';
 import { isPositiveMoney } from '../shared/money.js';
 import {
   prePickup,
@@ -31,6 +34,7 @@ import { applyDeliveryMilestone } from './delivery-milestones.js';
 import { currentDeliveryProof, deliveryProofCounts } from './delivery-evidence.js';
 import { clearTrackingEstimates } from './tracking-eta.js';
 import { archiveQuote, createWorkflow } from './workflow.js';
+import { createAI } from './ai.js';
 
 const deriveKey = promisify(scrypt);
 const project = fileURLToPath(new URL('../', import.meta.url));
@@ -120,6 +124,20 @@ function transaction(db, work) {
     throw error;
   }
 }
+/**
+ * @param {{
+ *   databasePath?: string,
+ *   secureCookies?: boolean,
+ *   publicPath?: string,
+ *   publicOrigin?: string,
+ *   sendResetLink?: ((opts: {to: string, url: string}) => Promise<void>) | null,
+ *   sendNotification?: ((payload: object) => Promise<void>) | null,
+ *   calculateRoute?: ((waypoints: {lat:number,lon:number}[]) => Promise<object>) | null,
+ *   geocode?: ((query: string) => Promise<object[]>) | null,
+ *   now?: () => number,
+ *   log?: { info: Function, warn: Function, error: Function },
+ * }} [options]
+ */
 export function createApplication({
   databasePath = resolve(project, 'data/yyc.sqlite'),
   secureCookies = false,
@@ -130,6 +148,9 @@ export function createApplication({
   calculateRoute = null,
   geocode = null,
   now = Date.now,
+  log = createLogger(),
+  backupDirectory = null,
+  claudeApiKey = null,
 } = {}) {
   if (databasePath !== ':memory:') mkdirSync(dirname(databasePath), { recursive: true });
   const origin = new URL(publicOrigin);
@@ -159,6 +180,8 @@ export function createApplication({
   const loginLimiter = createLoginLimiter();
   const registrationLimiter = createRegistrationLimiter();
   const resetLimiter = createRegistrationLimiter();
+  const evidenceLimiter = createEvidenceLimiter();
+  const shipmentLimiter = createShipmentLimiter();
   function accountEvent(actorId, userId, event) {
     db.prepare(
       'INSERT INTO account_audit(actor_id,user_id,event,created_at) VALUES (?,?,?,?)',
@@ -857,6 +880,12 @@ export function createApplication({
         db.prepare('DELETE FROM mobile_pairings WHERE shipment_id=?').run(id);
       }
       audit(s, user, message, previousRecipients);
+      if (ai) {
+        const anomalyStates = ['In transit', 'Delivery failed', 'Returning', 'Delivered'];
+        if (anomalyStates.includes(s.status))
+          void ai.runAnomalyCheck(s.id, (sid) => shipments({ role: 'admin' }, sid, true)[0])
+            .catch((err) => log.warn('Anomaly check error', { err: err?.message }));
+      }
       const result = { version: s.version };
       if (data.requestKey)
         db.prepare('INSERT INTO action_requests VALUES (?,?,?,?,?)').run(
@@ -965,6 +994,7 @@ export function createApplication({
     send,
     sendNotification,
   });
+  const ai = createAI({ claudeApiKey, db, now, log });
   const mobility = createMobility({
     db,
     now,
@@ -977,6 +1007,7 @@ export function createApplication({
     send,
     calculateRoute,
     publicOrigin,
+    ai,
   });
   const mobile = createMobile({
     db,
@@ -1044,6 +1075,29 @@ export function createApplication({
           'Cross-origin requests are not allowed.',
         );
       }
+      if (path === '/api/health' && req.method === 'GET') {
+        let dbStatus = 'ok';
+        try { db.prepare('SELECT 1').get(); } catch { dbStatus = 'error'; }
+        let backupStatus = 'unconfigured';
+        let backupAge = null;
+        if (backupDirectory) {
+          try {
+            const lastRun = JSON.parse(readFileSync(join(backupDirectory, 'last-run.json'), 'utf8'));
+            backupAge = Math.floor((now() - new Date(lastRun.completedAt).getTime()) / 1000);
+            backupStatus = lastRun.ok ? 'ok' : 'failed';
+          } catch {
+            backupStatus = 'never';
+          }
+        }
+        const healthy = dbStatus === 'ok';
+        send(res, healthy ? 200 : 503, {
+          status: healthy ? 'ok' : 'degraded',
+          uptime: process.uptime(),
+          db: dbStatus,
+          backup: { status: backupStatus, ageSeconds: backupAge },
+        });
+        return;
+      }
       if (path === '/api/setup' && req.method === 'GET') {
         send(res, 200, {
           required: !db.prepare("SELECT 1 FROM users WHERE role='admin'").get(),
@@ -1109,7 +1163,7 @@ export function createApplication({
                 db.prepare('DELETE FROM password_resets WHERE token_hash=?').run(
                   issued.tokenHash,
                 );
-                console.error('Password recovery delivery failed.');
+                log.error('Password recovery delivery failed');
               }
             }
             send(res, 200, {
@@ -1228,6 +1282,9 @@ export function createApplication({
       operations.expire();
       if (path === '/api/logout' && req.method === 'POST') {
         db.prepare('DELETE FROM sessions WHERE token_hash=?').run(current.token_hash);
+        db.prepare('DELETE FROM mobile_pairings WHERE user_id=?').run(current.user.id);
+        db.prepare('UPDATE mobile_devices SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL')
+          .run(now(), current.user.id);
         res.setHeader('Set-Cookie', cookie('', 0));
         send(res, 200, { ok: true });
         return;
@@ -1300,8 +1357,13 @@ export function createApplication({
         user = freshSession.user;
         operations.expire();
       }
+      if (req.method === 'POST' && /^\/api\/shipments\/[^/]+\/evidence$/.test(path))
+        requireThat(evidenceLimiter.check(user.id), 429, 'Too many evidence uploads. Try again later.');
       if (mobile.route(path, req, res, user, data)) return;
       if (await mobility.route(path, req, res, user, data)) return;
+      if (ai && path.startsWith('/api/ai/')) {
+        if (await ai.route(path, req, res, user, data, { send, requireThat, shipments, db })) return;
+      }
       if (
         await operations.route(
           path,
@@ -1508,6 +1570,7 @@ export function createApplication({
       }
       if (path === '/api/shipments' && req.method === 'POST') {
         requireThat(user.role === 'store', 403, 'Only stores can request delivery.');
+        requireThat(shipmentLimiter.check(user.id), 429, 'Too many shipment requests. Try again later.');
         const requestKey = req.headers['idempotency-key'];
         requireThat(
           typeof requestKey === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(requestKey),
@@ -1589,7 +1652,7 @@ export function createApplication({
       throw new HttpError(404, 'Endpoint not found.');
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
-      if (status === 500) console.error('Request failed:', error);
+      if (status === 500) log.error('Request failed', { err: error?.message, stack: error?.stack });
       if (!res.headersSent)
         send(res, status, {
           error: status === 500 ? 'Server error. Please try again.' : error.message,

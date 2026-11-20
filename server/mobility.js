@@ -22,8 +22,9 @@ export function createMobility({
   send,
   calculateRoute,
   publicOrigin,
+  ai = null,
 }) {
-  db.exec(`CREATE TABLE IF NOT EXISTS recipient_links(token_hash TEXT PRIMARY KEY,shipment_id TEXT NOT NULL REFERENCES shipments(id),expires_at INTEGER NOT NULL);
+  db.exec(`CREATE TABLE IF NOT EXISTS recipient_links(token_hash TEXT PRIMARY KEY,shipment_id TEXT NOT NULL REFERENCES shipments(id),expires_at INTEGER NOT NULL,ai_message TEXT);
     CREATE TABLE IF NOT EXISTS action_requests(user_id TEXT NOT NULL REFERENCES users(id),request_key TEXT NOT NULL,shipment_id TEXT NOT NULL REFERENCES shipments(id),request_hash TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(user_id,request_key));`);
   const busyRoutes = new Set();
   function stopAction(s, user, data) {
@@ -149,6 +150,7 @@ export function createMobility({
       stopsCompleted: (s.stops || []).filter((stop) => stop.completedAt).length,
       stopsTotal: (s.stops || []).length,
       expiresAt: link.expires_at,
+      aiMessage: link.ai_message || null,
     });
   }
   async function route(path, req, res, user, _data) {
@@ -171,12 +173,23 @@ export function createMobility({
         }
         const token = randomBytes(32).toString('hex'),
           expiresAt = now() + 7 * 86400000;
-        db.prepare('INSERT INTO recipient_links VALUES (?,?,?)').run(
+        db.prepare('INSERT INTO recipient_links VALUES (?,?,?,?)').run(
           digest(token),
           s.id,
           expiresAt,
+          null,
         );
         audit(s, user, 'Recipient tracking link issued');
+        if (ai) {
+          const shipmentSnap = s;
+          void ai.generateRecipientNotification(shipmentSnap, 'link_issued')
+            .then((msg) => {
+              if (msg)
+                db.prepare('UPDATE recipient_links SET ai_message=? WHERE shipment_id=?')
+                  .run(msg, shipmentSnap.id);
+            })
+            .catch(() => {});
+        }
         return { url: `${publicOrigin}/react/#track=${token}`, expiresAt };
       });
       send(res, 200, result);

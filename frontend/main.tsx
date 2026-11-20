@@ -26,6 +26,8 @@ import { Setup } from './Setup';
 import { CustomerRequests } from './CustomerRequests';
 import { RateChange } from './RateChange';
 import { useWorkspaceSync } from './useWorkspaceSync';
+import { ErrorBoundary } from './ErrorBoundary';
+import { AiAssist } from './AiAssist';
 import { Accounts } from './Accounts';
 import { RecoveryRequest, ResetPassword } from './Recovery';
 import { createBooking } from './booking';
@@ -545,8 +547,40 @@ function Booking({
   save: (data: Payload) => Promise<void>;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const [aiFields, setAiFields] = useState<Record<string, unknown>>({});
+  const [aiText, setAiText] = useState('');
   return (
     <div ref={container}>
+      <section className="card ai-booking-assist">
+        <h2>AI booking assistant</h2>
+        <p className="muted">Describe the shipment in plain language and let AI fill the form.</p>
+        <textarea
+          className="ai-booking-textarea"
+          value={aiText}
+          onChange={(e) => setAiText(e.target.value)}
+          placeholder="e.g. 10 pallets downtown Friday morning liftgate required, 500kg dry goods"
+          rows={3}
+        />
+        <AiAssist<{ fields: Record<string, unknown> }>
+          label="Parse with AI"
+          endpoint="/api/ai/booking-parse"
+          method="POST"
+          body={{ text: aiText }}
+        >
+          {(result) => (
+            <div>
+              <ul className="ai-field-list">
+                {Object.entries(result.fields).map(([k, v]) => (
+                  <li key={k}><strong>{k}</strong>: {String(v)}</li>
+                ))}
+              </ul>
+              <button type="button" className="btn light small" onClick={() => setAiFields(result.fields)}>
+                Apply to form
+              </button>
+            </div>
+          )}
+        </AiAssist>
+      </section>
       <section className="card wizard">
         <h2>Request a delivery</h2>
         <Form busy={busy} label="Submit delivery request" onSave={save}>
@@ -563,16 +597,16 @@ function Booking({
               list="saved-addresses"
               value={user.profile.address}
             />
-            <Field name="date" label="Pickup date" type="date" />
+            <Field name="date" label="Pickup date" type="date" value={aiFields.date as string | undefined} />
             <Select
               name="window"
               label="Pickup window"
               values={['09:00–12:00', '13:00–16:00', 'Flexible']}
             />
-            <Field name="goods" label="Goods / cargo" />
+            <Field name="goods" label="Goods / cargo" value={aiFields.goods as string | undefined} />
             <Select name="type" label="Vehicle type" values={['Box truck', 'Dry van']} />
-            <Field name="kg" label="Weight (kg)" type="number" />
-            <Field name="pallets" label="Pallet count" type="number" />
+            <Field name="kg" label="Weight (kg)" type="number" value={aiFields.kg as string | undefined} />
+            <Field name="pallets" label="Pallet count" type="number" value={aiFields.pallets as string | undefined} />
             <Select
               name="unloading"
               label="Unloading requirements"
@@ -786,6 +820,25 @@ function Actions({
               'Send job offer',
               <div className="field">
                 <DispatchReadiness s={s} drivers={drivers} shipments={shipments} />
+                <AiAssist<{ driverId: string; reason: string; alternatives: { driverId: string; reason: string }[] }>
+                  label="AI dispatch recommendation"
+                  endpoint="/api/ai/dispatch-recommend"
+                  method="POST"
+                  body={{ shipmentId: s.id }}
+                >
+                  {(result) => (
+                    <div className="ai-dispatch-result">
+                      <p><strong>Recommended:</strong> {drivers.find((d) => d.id === result.driverId)?.name || result.driverId} — {result.reason}</p>
+                      {result.alternatives?.length > 0 && (
+                        <details><summary>Alternatives</summary>
+                          {result.alternatives.map((a) => (
+                            <p key={a.driverId}>{drivers.find((d) => d.id === a.driverId)?.name || a.driverId} — {a.reason}</p>
+                          ))}
+                        </details>
+                      )}
+                    </div>
+                  )}
+                </AiAssist>
                 <label htmlFor="driverId">Approved suitable driver</label>
                 <select id="driverId" name="driverId" required>
                   <option value="">Choose a driver</option>
@@ -799,11 +852,30 @@ function Actions({
             )}
           {s.issue &&
             !s.issue.resolved &&
-            form(
-              'resolve',
-              'Resolve exception',
-              <Field name="resolution" label="Resolution" />,
-            )}
+            (<>
+              {form(
+                'resolve',
+                'Resolve exception',
+                <Field name="resolution" label="Resolution" />,
+              )}
+              <AiAssist<{ suggestions: { action: string; reason: string; detail: string }[] }>
+                label="AI exception suggestions"
+                endpoint="/api/ai/exception-suggest"
+                method="POST"
+                body={{ shipmentId: s.id }}
+              >
+                {(result) => (
+                  <ul className="ai-suggestions">
+                    {result.suggestions.map((s, i) => (
+                      <li key={i} className="ai-suggestion-item">
+                        <strong>{s.action}</strong> — {s.reason}
+                        {s.detail && <p>{s.detail}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </AiAssist>
+            </>)}
           {prePickup.includes(s.status) && (
             <details>
               <summary>Revise shipment</summary>
@@ -1105,6 +1177,15 @@ function Delivery({
           </section>
         )}
         <section className="card">
+          <h2>AI summary</h2>
+          <AiAssist<{ summary: string }>
+            label="Summarize this delivery"
+            endpoint={`/api/ai/shipment-summary/${s.id}`}
+          >
+            {(result) => <p>{result.summary}</p>}
+          </AiAssist>
+        </section>
+        <section className="card">
           <h2>Activity history</h2>
           {s.history.map((h, i) => (
             <div className="activity" key={i}>
@@ -1148,6 +1229,13 @@ function App() {
   const setMessage = useAppStore((s) => s.setMessage);
   const clearMessage = useAppStore((s) => s.clearMessage);
 
+  const [installPromptVisible, setInstallPromptVisible] = useState(
+    () => !localStorage.getItem('yyc-install-dismissed'),
+  );
+  const [aiFlags, setAiFlags] = useState<{ id: number; shipment_id: string; flag_type: string; severity: string; message: string; acknowledged: number }[]>([]);
+  const PAGE_SIZE = 20;
+  const [deliveryPage, setDeliveryPage] = useState(0);
+
   const page = useUiStore((s) => s.page);
   const billingShipmentId = useUiStore((s) => s.billingShipmentId);
   const selected = useUiStore((s) => s.selected);
@@ -1168,6 +1256,10 @@ function App() {
     const timer = setTimeout(() => clearMessage(), 6000);
     return () => clearTimeout(timer);
   }, [message, clearMessage]);
+  useEffect(() => {
+    if (page !== 'alerts' || state?.user.role !== 'admin') return;
+    void api<{ flags: typeof aiFlags }>('/api/ai/flags').then((r) => setAiFlags(r.flags)).catch(() => {});
+  }, [page, state?.user.role]);
   useEffect(() => {
     if (!state) close();
     useUiStore
@@ -1283,13 +1375,18 @@ function App() {
               a.id.localeCompare(b.id),
           )
         : filtered;
+  useEffect(() => { setDeliveryPage(0); }, [query, status, page]);
+  const pageCount = Math.ceil(displayed.length / PAGE_SIZE);
+  const pageSlice = displayed.slice(deliveryPage * PAGE_SIZE, (deliveryPage + 1) * PAGE_SIZE);
   const current = shipments.find((s) => s.id === selected);
   function openBilling(id: string) {
     close();
     setPage('billing', id);
   }
   function cards(list: Shipment[]) {
-    return list.length ? (
+    return (
+    <ErrorBoundary>
+    {list.length ? (
       <div className="grid2 shipment-grid">
         {list.map((s) => {
           const next = nextStep(s, user, shipments);
@@ -1373,6 +1470,8 @@ function App() {
           </button>
         )}
       </section>
+    )}
+    </ErrorBoundary>
     );
   }
   return (
@@ -1408,6 +1507,34 @@ function App() {
               </button>
             ))}
           </nav>
+          {installPromptVisible && deferredInstallPrompt && (
+            <div className="install-banner">
+              <p>Add YYC to your home screen for faster access.</p>
+              <div className="row">
+                <button
+                  className="btn light small"
+                  onClick={async () => {
+                    await deferredInstallPrompt!.prompt();
+                    const { outcome } = await deferredInstallPrompt!.userChoice;
+                    if (outcome === 'accepted') deferredInstallPrompt = null;
+                    setInstallPromptVisible(false);
+                    localStorage.setItem('yyc-install-dismissed', '1');
+                  }}
+                >
+                  Install
+                </button>
+                <button
+                  className="textbtn"
+                  onClick={() => {
+                    setInstallPromptVisible(false);
+                    localStorage.setItem('yyc-install-dismissed', '1');
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
           <div className="sidebottom">
             <b>{user.name}</b>
             <p>{user.role === 'admin' ? 'Broker' : user.role}</p>
@@ -1469,6 +1596,7 @@ function App() {
             </p>
           )}
           <div className="workspace" inert={needsRefresh}>
+          <ErrorBoundary>
             <div className="pagetitle">
               <span className="section-eyebrow">YYC BROKERS · DELIVERY OPERATIONS</span>
               <h1>{pages.find(([id]) => id === page)?.[1]}</h1>
@@ -1725,6 +1853,28 @@ function App() {
                     )}
                   </>
                 )}
+                {page === 'alerts' && state?.user.role === 'admin' && aiFlags.filter((f) => !f.acknowledged).length > 0 && (
+                  <section className="card">
+                    <h2>AI anomaly flags</h2>
+                    {aiFlags.filter((f) => !f.acknowledged).map((f) => (
+                      <div key={f.id} className="ai-flag-item">
+                        <span className={`ai-flag-severity severity-${f.severity}`}>{f.severity}</span>
+                        <span>{f.message} <small>({f.shipment_id})</small></span>
+                        <button
+                          type="button"
+                          className="btn light small"
+                          onClick={() =>
+                            void api(`/api/ai/flags/${f.id}/acknowledge`, 'POST')
+                              .then(() => setAiFlags((prev) => prev.map((x) => x.id === f.id ? { ...x, acknowledged: 1 } : x)))
+                              .catch(() => {})
+                          }
+                        >
+                          Acknowledge
+                        </button>
+                      </div>
+                    ))}
+                  </section>
+                )}
                 <div className="delivery-list-heading">
                   <div>
                     <span className="section-eyebrow">DELIVERY WORKSPACE</span>
@@ -1794,7 +1944,30 @@ function App() {
                     ))}
                   </div>
                 ) : (
-                  cards(displayed)
+                  <>
+                    {cards(pageSlice)}
+                    {pageCount > 1 && (
+                      <div className="pagination">
+                        <button
+                          className="btn light small"
+                          disabled={deliveryPage === 0}
+                          onClick={() => setDeliveryPage((p) => p - 1)}
+                        >
+                          Previous
+                        </button>
+                        <span>
+                          Page {deliveryPage + 1} of {pageCount}
+                        </span>
+                        <button
+                          className="btn light small"
+                          disabled={deliveryPage >= pageCount - 1}
+                          onClick={() => setDeliveryPage((p) => p + 1)}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
                 {['dashboard', 'tracking'].includes(page) && (
                   <section className="card mapcard">
@@ -1807,25 +1980,38 @@ function App() {
               YYC Brokers · Data saved on this server · External online payments not
               connected
             </footer>
+          </ErrorBoundary>
           </div>
         </main>
       </div>
       {current && (
-        <Delivery
-          shipments={shipments}
-          s={current}
-          user={user}
-          drivers={drivers}
-          busy={busy || needsRefresh}
-          close={close}
-          openBilling={openBilling}
-          act={(action, data = {}) => act(current.id, current.version, action, data)}
-        />
+        <ErrorBoundary>
+          <Delivery
+            shipments={shipments}
+            s={current}
+            user={user}
+            drivers={drivers}
+            busy={busy || needsRefresh}
+            close={close}
+            openBilling={openBilling}
+            act={(action, data = {}) => act(current.id, current.version, action, data)}
+          />
+        </ErrorBoundary>
       )}
       {toast}
     </>
   );
 }
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e as BeforeInstallPromptEvent;
+});
+
 const recipientToken = new URLSearchParams(location.hash.slice(1)).get('track');
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

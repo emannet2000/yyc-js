@@ -111,6 +111,7 @@ test('recipient links are private, expiring, revocable and rotated without expos
   assert.deepEqual(
     Object.keys(view.value).sort(),
     [
+      'aiMessage',
       'date',
       'eta',
       'etaUpdatedAt',

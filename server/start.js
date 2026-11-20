@@ -8,9 +8,12 @@ import { createApplication } from './app.js';
 import { createGeocoder } from './geocoder.js';
 import { checkConfiguration } from './config-check.js';
 import { ensureBootstrapBroker } from './bootstrap-broker.js';
+import { createLogger } from './logger.js';
+const log = createLogger();
 const config = startupConfig();
 for (const item of checkConfiguration())
-  if (item.level !== 'ok') console.warn(`Setup: ${item.area}: ${item.message}`);
+  if (item.level !== 'ok') log.warn('Configuration warning', { area: item.area, message: item.message });
+const backupDirectory = process.env.BACKUP_DIRECTORY || resolve('data/backups');
 const app = createApplication({
   calculateRoute: createRoadRouter(),
   geocode: createGeocoder(),
@@ -19,24 +22,27 @@ const app = createApplication({
   sendResetLink: configuredResetDelivery(),
   sendNotification: configuredWebhook('NOTIFICATION_DELIVERY'),
   secureCookies: config.secureCookies,
+  log,
+  backupDirectory,
+  claudeApiKey: process.env.ANTHROPIC_API_KEY || null,
 });
 const backups = createBackupPolicy({
   source: config.databasePath,
-  directory: process.env.BACKUP_DIRECTORY || resolve('data/backups'),
+  directory: backupDirectory,
   keep: config.backupKeep,
   upload: configuredBackupUpload(),
   alert: configuredWebhook('OPERATIONS_ALERT'),
 });
 const { port, host } = config;
 const bootstrap = await ensureBootstrapBroker(app);
-if (bootstrap.created) console.log('First broker account created from ADMIN_* settings.');
+if (bootstrap.created) log.info('First broker account created from ADMIN_* settings.');
 app.server.listen(port, host, () =>
-  console.log(`YYC workspace: http://${host}:${port}/react/`),
+  log.info('Server listening', { url: `http://${host}:${port}/react/` }),
 );
 const backup = () =>
   void backups
     .run()
-    .catch(() => console.error('Scheduled backup failed. Check backup last-run.json.'));
+    .catch(() => log.error('Scheduled backup failed', { hint: 'Check backup last-run.json' }));
 // Retention: location samples older than this are deleted. The default of 90
 // days is a placeholder until the business sets its own policy.
 const locationHistoryDays = Number(process.env.LOCATION_HISTORY_DAYS ?? 90);
@@ -54,7 +60,7 @@ const notificationTimer = setInterval(() => {
   app.expire();
   void app
     .processNotifications()
-    .catch(() => console.error('Notification worker failed.'));
+    .catch(() => log.error('Notification worker failed'));
 }, 30000);
 notificationTimer.unref();
 function shutdown() {

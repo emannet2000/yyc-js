@@ -20,6 +20,24 @@ const GEOCODE_RETRY_MS = 10 * 60 * 1000;
 // Most recent accepted GPS samples kept per delivery.
 const TRACK_HISTORY_LIMIT = 500;
 
+/**
+ * @param {{
+ *   db: import('node:sqlite').DatabaseSync,
+ *   geocode?: ((query: string) => Promise<object[]>) | null,
+ *   now: () => number,
+ *   text: (v: unknown) => string,
+ *   positive: (v: unknown) => number,
+ *   choice: (v: unknown, choices: string[]) => string,
+ *   requireThat: (cond: boolean, status: number, msg: string) => void,
+ *   transaction: (db: object, fn: () => unknown) => unknown,
+ *   shipments: () => object[],
+ *   persist: (id: string, data: object) => void,
+ *   audit: (shipmentId: string, actorId: string, event: string) => void,
+ *   account: (row: object) => object,
+ *   accountEvent: (actorId: string, userId: string, event: string) => void,
+ *   send: (res: object, status: number, body: unknown) => void,
+ * }} opts
+ */
 export function createOperations({
   db,
   geocode = null,
